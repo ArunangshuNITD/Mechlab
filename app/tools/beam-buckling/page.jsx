@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   ArrowLeft, 
@@ -29,19 +29,95 @@ export default function BeamBucklingPage() {
     condition: 'pinned_pinned'
   });
 
-  const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [hasCalculated, setHasCalculated] = useState(false);
+  const [pythonResult, setPythonResult] = useState(null);
 
   // Gemini AI States
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
 
+  // Real-time local calculation engine for smooth animations and instant feedback
+  const computedData = useMemo(() => {
+    const E = (Number(inputs.E_gpa) || 0) * 1e9;  // Pa
+    const I = (Number(inputs.I_cm4) || 0) * 1e-8; // m4
+    const A = (Number(inputs.A_cm2) || 0) * 1e-4; // m2
+    const L = Number(inputs.L_m) || 1.0;          // m
+    const P = Number(inputs.P_kn) || 0;           // kN
+
+    const K_map = {
+      pinned_pinned: 1.0,
+      fixed_fixed: 0.5,
+      fixed_pinned: 0.7,
+      fixed_free: 2.0
+    };
+    const K = K_map[inputs.condition] || 1.0;
+    const Le = K * L;
+
+    if (E <= 0 || I <= 0 || A <= 0 || L <= 0) {
+      return null;
+    }
+
+    // Euler Critical Load P_cr = (pi^2 * E * I) / (Le^2)
+    const P_cr_N = (Math.PI ** 2 * E * I) / (Le ** 2);
+    const P_cr_kn = P_cr_N / 1000;
+    const sigma_cr_mpa = (P_cr_N / A) / 1e6;
+    const r_m = Math.sqrt(I / A);
+    const r_mm = r_m * 1000;
+    const slenderness = Le / r_m;
+
+    const isBuckled = P > 0 && P >= P_cr_kn;
+    const safety_factor = P > 0 ? (P_cr_kn / P).toFixed(2) : "∞";
+
+    // Generate deflection curve points (50 points along span)
+    const points = [];
+    const numPoints = 50;
+    for (let i = 0; i < numPoints; i++) {
+      const x_ratio = i / (numPoints - 1);
+      let deflection = 0;
+
+      if (P > 0) {
+        // Support-condition specific mode shapes
+        if (inputs.condition === 'fixed_fixed') {
+          deflection = 0.5 * (1 - Math.cos(2 * Math.PI * x_ratio));
+        } else if (inputs.condition === 'fixed_free') {
+          deflection = 1 - Math.cos((Math.PI * x_ratio) / 2);
+        } else if (inputs.condition === 'fixed_pinned') {
+          deflection = 0.5 * (1 - Math.cos(1.43 * Math.PI * x_ratio));
+        } else {
+          // pinned_pinned
+          deflection = Math.sin(Math.PI * x_ratio);
+        }
+      }
+
+      points.push({ x_ratio, deflection });
+    }
+
+    return {
+      P_cr_kn: P_cr_kn.toFixed(1),
+      sigma_cr_mpa: sigma_cr_mpa.toFixed(1),
+      slenderness: slenderness.toFixed(1),
+      effective_length_m: Le.toFixed(2),
+      radius_of_gyration_mm: r_mm.toFixed(1),
+      K_factor: K,
+      isBuckled,
+      safety_factor,
+      curve_points: points
+    };
+  }, [inputs]);
+
+  // Use Python backend result if available, otherwise fallback to local real-time computation
+  const activeResult = pythonResult || computedData;
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setInputs(prev => ({ ...prev, [name]: value === '' ? '' : Number(value) || value }));
+    setInputs(prev => ({ 
+      ...prev, 
+      [name]: value === '' ? '' : (name === 'condition' ? value : Number(value)) 
+    }));
+    // Reset server python result on input edit so real-time computation takes over
+    if (pythonResult) setPythonResult(null);
   };
 
   const runPythonSolver = async () => {
@@ -57,77 +133,25 @@ export default function BeamBucklingPage() {
       if (data.error) {
         setError(data.error);
       } else {
-        setResult(data);
-        setHasCalculated(true);
+        setPythonResult(data);
       }
     } catch (err) {
-      // Fallback local calculation engine if API is offline
-      simulateLocalCalculation();
+      // Fallback silently to computedData on API unavailability
+      setError("Backend server API offline. Using real-time calculation client.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Local fallback calculation for instant feedback & smooth animation demo
-  const simulateLocalCalculation = () => {
-    const E = inputs.E_gpa * 1e9; // Pa
-    const I = inputs.I_cm4 * 1e-8; // m4
-    const A = inputs.A_cm2 * 1e-4; // m2
-    const L = inputs.L_m; // m
-    const P = inputs.P_kn * 1000; // N
-
-    const K_map = {
-      pinned_pinned: 1.0,
-      fixed_fixed: 0.5,
-      fixed_pinned: 0.7,
-      fixed_free: 2.0
-    };
-    const K = K_map[inputs.condition] || 1.0;
-    const Le = K * L;
-
-    // Euler Critical Load P_cr = (pi^2 * E * I) / (Le^2)
-    const P_cr_N = (Math.PI ** 2 * E * I) / (Le ** 2);
-    const P_cr_kn = P_cr_N / 1000;
-    const sigma_cr_mpa = (P_cr_N / A) / 1e6;
-    const r_mm = Math.sqrt(I / A) * 1000;
-    const slenderness = Le / (r_mm / 1000);
-
-    const isBuckled = inputs.P_kn > 0 && inputs.P_kn >= P_cr_kn;
-    const safety_factor = inputs.P_kn > 0 ? (P_cr_kn / inputs.P_kn).toFixed(2) : "∞";
-
-    // Generate curve points (50 points along span)
-    const points = [];
-    const numPoints = 50;
-    for (let i = 0; i < numPoints; i++) {
-      const x_ratio = i / (numPoints - 1);
-      const deflection = inputs.P_kn === 0 ? 0 : Math.sin(Math.PI * x_ratio);
-      points.push({ x_ratio, deflection });
-    }
-
-    setResult({
-      P_cr_kn: P_cr_kn.toFixed(1),
-      sigma_cr_mpa: sigma_cr_mpa.toFixed(1),
-      slenderness: slenderness.toFixed(1),
-      effective_length_m: Le.toFixed(2),
-      radius_of_gyration_mm: r_mm.toFixed(1),
-      K_factor: K,
-      isBuckled,
-      safety_factor,
-      curve_points: points
-    });
-    setHasCalculated(true);
-  };
-
-  // Trigger Gemini AI API Route
   const fetchAiAnalysis = async () => {
-    if (!result) return;
+    if (!activeResult) return;
     setAiLoading(true);
     setAiError(null);
     try {
       const res = await fetch('/api/ai-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, result })
+        body: JSON.stringify({ inputs, result: activeResult })
       });
       const data = await res.json();
       if (data.error) {
@@ -151,37 +175,28 @@ export default function BeamBucklingPage() {
       P_kn: 0,
       condition: 'pinned_pinned'
     });
-    setResult(null);
-    setHasCalculated(false);
+    setPythonResult(null);
+    setError(null);
     setAiAnalysis(null);
     setAiError(null);
   };
 
-  // Compute animated SVG path string
+  // Compute animated SVG path string dynamically
   const getSvgPathString = () => {
-    const numPoints = 50;
-    const points = [];
+    if (!activeResult || !activeResult.curve_points) return "M 0 50 L 500 50";
 
-    let amplitude = 0;
-    if (inputs.P_kn > 0 && result) {
-      const loadRatio = inputs.P_kn / parseFloat(result.P_cr_kn);
-      amplitude = Math.min(Math.max(loadRatio * 28, 6), 42);
-    }
+    const loadRatio = inputs.P_kn / (parseFloat(activeResult.P_cr_kn) || 1);
+    const amplitude = inputs.P_kn > 0 ? Math.min(Math.max(loadRatio * 28, 6), 42) : 0;
 
-    for (let i = 0; i < numPoints; i++) {
-      const xRatio = i / (numPoints - 1);
-      const x = xRatio * 500;
-      const modeShape = Math.sin(Math.PI * xRatio);
-      const y = 50 - (modeShape * amplitude);
-      points.push({ x, y });
-    }
-
-    return points.reduce((acc, pt, idx) => {
-      return idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`;
+    return activeResult.curve_points.reduce((acc, pt, idx) => {
+      const x = pt.x_ratio * 500;
+      const y = 50 - (pt.deflection * amplitude);
+      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
     }, '');
   };
 
-  const isBuckled = result?.isBuckled ?? false;
+  const isBuckled = activeResult?.isBuckled ?? false;
+  const maxSliderValue = activeResult ? Math.ceil(parseFloat(activeResult.P_cr_kn) * 1.5) : 1000;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
@@ -215,7 +230,7 @@ export default function BeamBucklingPage() {
             className="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs shadow-lg shadow-cyan-500/25 transition-all hover:scale-[1.03] active:scale-95 disabled:opacity-50"
           >
             {loading ? <Activity className="w-4 h-4 animate-spin text-slate-950" /> : <Play className="w-4 h-4 fill-slate-950" />}
-            {loading ? 'Computing...' : 'Execute Calculation'}
+            {loading ? 'Computing...' : 'Run Server Solver'}
           </button>
         </div>
       </header>
@@ -232,11 +247,11 @@ export default function BeamBucklingPage() {
                 Euler Critical Buckling Formula
               </h2>
               <p className="text-slate-400 text-xs max-w-xl">
-                Determines the maximum axial force {"$P_{cr}$"} a column can support before undergoing lateral elastic buckling deflection.
+                Determines the maximum axial force <strong>P<sub>cr</sub></strong> a column can support before undergoing lateral elastic buckling deflection.
               </p>
             </div>
             <div className="bg-slate-950/90 border border-slate-800 px-6 py-3 rounded-xl font-mono text-cyan-300 text-base shadow-inner">
-              {"$$P_{cr} = \\frac{\\pi^2 E I}{(KL)^2}$$"}
+              P<sub>cr</sub> = &pi;<sup>2</sup> E I / (K L)<sup>2</sup>
             </div>
           </div>
         </section>
@@ -265,7 +280,7 @@ export default function BeamBucklingPage() {
               <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800/80 space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <Sliders className="w-3.5 h-3.5 text-cyan-400" /> Applied Load ({"$P_{\\text{applied}}$"})
+                    <Sliders className="w-3.5 h-3.5 text-cyan-400" /> Applied Load (P<sub>applied</sub>)
                   </span>
                   <span className={`text-sm font-bold px-2.5 py-0.5 rounded-lg ${
                     inputs.P_kn === 0 
@@ -281,8 +296,8 @@ export default function BeamBucklingPage() {
                 <input 
                   type="range" 
                   min="0" 
-                  max={result ? Math.ceil(parseFloat(result.P_cr_kn) * 1.5) : 1000} 
-                  step="10"
+                  max={maxSliderValue} 
+                  step="5"
                   name="P_kn" 
                   value={inputs.P_kn} 
                   onChange={handleInputChange}
@@ -290,9 +305,9 @@ export default function BeamBucklingPage() {
                 />
 
                 <div className="flex justify-between text-[10px] text-slate-500">
-                  <span>0 kN (Straight)</span>
-                  {result && <span className="text-amber-400">P_cr: {result.P_cr_kn} kN</span>}
-                  <span>Max Force</span>
+                  <span>0 kN (Neutral)</span>
+                  {activeResult && <span className="text-amber-400 font-bold">P<sub>cr</sub>: {activeResult.P_cr_kn} kN</span>}
+                  <span>{maxSliderValue} kN</span>
                 </div>
               </div>
 
@@ -315,7 +330,7 @@ export default function BeamBucklingPage() {
               {/* Young's Modulus E */}
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
-                  <span>Young's Modulus ({"$E$"})</span>
+                  <span>Young's Modulus (E)</span>
                   <span className="text-cyan-400 font-bold">{inputs.E_gpa} GPa</span>
                 </div>
                 <input 
@@ -330,7 +345,7 @@ export default function BeamBucklingPage() {
               {/* Moment of Inertia I */}
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
-                  <span>Second Moment of Area ({"$I$"})</span>
+                  <span>Second Moment of Area (I)</span>
                   <span className="text-cyan-400 font-bold">{inputs.I_cm4} cm⁴</span>
                 </div>
                 <input 
@@ -345,7 +360,7 @@ export default function BeamBucklingPage() {
               {/* Cross Section Area A */}
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
-                  <span>Cross-Sectional Area ({"$A$"})</span>
+                  <span>Cross-Sectional Area (A)</span>
                   <span className="text-cyan-400 font-bold">{inputs.A_cm2} cm²</span>
                 </div>
                 <input 
@@ -360,7 +375,7 @@ export default function BeamBucklingPage() {
               {/* Length L */}
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
-                  <span>Column Unbraced Length ({"$L$"})</span>
+                  <span>Column Unbraced Length (L)</span>
                   <span className="text-cyan-400 font-bold">{inputs.L_m} meters</span>
                 </div>
                 <input 
@@ -379,7 +394,7 @@ export default function BeamBucklingPage() {
               onClick={runPythonSolver}
               className="w-full bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 font-semibold py-3 rounded-xl text-xs transition-colors flex items-center justify-center gap-2"
             >
-              <Zap className="w-3.5 h-3.5" /> Recalculate & Animate
+              <Zap className="w-3.5 h-3.5" /> Execute Server Calculation
             </button>
           </div>
 
@@ -442,7 +457,7 @@ export default function BeamBucklingPage() {
                       fill="none"
                       stroke={inputs.P_kn === 0 ? "#64748b" : isBuckled ? "#f43f5e" : "#06b6d4"}
                       strokeWidth={isBuckled ? "4" : "3"}
-                      className="transition-all duration-700 ease-out"
+                      className="transition-all duration-300 ease-out"
                       style={{
                         filter: isBuckled ? 'drop-shadow(0 0 10px rgba(244, 63, 94, 0.6))' : 'drop-shadow(0 0 8px rgba(6, 182, 212, 0.4))'
                       }}
@@ -450,10 +465,10 @@ export default function BeamBucklingPage() {
                     {inputs.P_kn > 0 && (
                       <circle 
                         cx="250" 
-                        cy={50 - (result ? Math.min(Math.max((inputs.P_kn / parseFloat(result.P_cr_kn)) * 28, 6), 42) : 15)} 
+                        cy={50 - (activeResult ? Math.min(Math.max((inputs.P_kn / parseFloat(activeResult.P_cr_kn)) * 28, 6), 42) : 15)} 
                         r="5" 
                         fill={isBuckled ? "#f43f5e" : "#06b6d4"}
-                        className="transition-all duration-700 ease-out animate-pulse"
+                        className="transition-all duration-300 ease-out animate-pulse"
                       />
                     )}
                   </svg>
@@ -463,8 +478,8 @@ export default function BeamBucklingPage() {
                 </div>
 
                 <div className="flex justify-between text-[10px] font-mono text-slate-500 pt-2 border-t border-slate-900">
-                  <span>x = 0 (Fixed / Pinned Base)</span>
-                  <span className="text-slate-400">x = {(inputs.L_m / 2).toFixed(2)}m (Mid-span Max Deflection)</span>
+                  <span>x = 0 (Base Support)</span>
+                  <span className="text-slate-400">x = {(inputs.L_m / 2).toFixed(2)}m (Mid-span Deflection)</span>
                   <span>x = {inputs.L_m}m (Top Support)</span>
                 </div>
               </div>
@@ -479,7 +494,7 @@ export default function BeamBucklingPage() {
             )}
 
             {/* Results Display Area */}
-            {hasCalculated && result ? (
+            {activeResult && (
               <>
                 {/* Buckling Status Indicator Banner */}
                 <div className={`p-6 rounded-2xl border transition-all duration-500 ${
@@ -509,7 +524,7 @@ export default function BeamBucklingPage() {
                   <div className="text-right font-mono">
                     <div className="text-xs text-slate-400">Factor of Safety</div>
                     <div className={`text-3xl font-extrabold ${isBuckled ? 'text-rose-400' : 'text-emerald-400'}`}>
-                      {result.safety_factor}
+                      {activeResult.safety_factor}
                     </div>
                   </div>
                 </div>
@@ -517,28 +532,28 @@ export default function BeamBucklingPage() {
                 {/* Key Metrics Cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 font-mono">
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Critical Load ({"$P_{cr}$"})</div>
-                    <div className="text-xl font-bold text-cyan-400">{result.P_cr_kn} kN</div>
+                    <div className="text-xs text-slate-500 mb-1">Critical Load (P<sub>cr</sub>)</div>
+                    <div className="text-xl font-bold text-cyan-400">{activeResult.P_cr_kn} kN</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Critical Stress ({"$\\sigma_{cr}$"})</div>
-                    <div className="text-xl font-bold text-slate-200">{result.sigma_cr_mpa} MPa</div>
+                    <div className="text-xs text-slate-500 mb-1">Critical Stress (&sigma;<sub>cr</sub>)</div>
+                    <div className="text-xl font-bold text-slate-200">{activeResult.sigma_cr_mpa} MPa</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Slenderness Ratio ({"$\\lambda$"})</div>
-                    <div className="text-xl font-bold text-slate-200">{result.slenderness}</div>
+                    <div className="text-xs text-slate-500 mb-1">Slenderness (&lambda;)</div>
+                    <div className="text-xl font-bold text-slate-200">{activeResult.slenderness}</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Effective Length ({"$L_e$"})</div>
-                    <div className="text-xl font-bold text-slate-200">{result.effective_length_m} m</div>
+                    <div className="text-xs text-slate-500 mb-1">Effective Length (L<sub>e</sub>)</div>
+                    <div className="text-xl font-bold text-slate-200">{activeResult.effective_length_m} m</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Radius of Gyration ({"$r$"})</div>
-                    <div className="text-xl font-bold text-slate-200">{result.radius_of_gyration_mm} mm</div>
+                    <div className="text-xs text-slate-500 mb-1">Radius of Gyration (r)</div>
+                    <div className="text-xl font-bold text-slate-200">{activeResult.radius_of_gyration_mm} mm</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
                     <div className="text-xs text-slate-500 mb-1">K-Factor</div>
-                    <div className="text-xl font-bold text-slate-200">{result.K_factor}</div>
+                    <div className="text-xl font-bold text-slate-200">{activeResult.K_factor}</div>
                   </div>
                 </div>
 
@@ -572,20 +587,12 @@ export default function BeamBucklingPage() {
                   )}
 
                   {aiAnalysis && (
-                    <div className="mt-4 pt-4 border-t border-slate-800/80 text-xs font-sans text-slate-300 leading-relaxed whitespace-pre-line space-y-2 bg-slate-950/70 p-4 rounded-xl border border-slate-800/90 font-mono">
+                    <div className="mt-4 pt-4 border-t border-slate-800/80 text-xs text-slate-300 leading-relaxed whitespace-pre-line space-y-2 bg-slate-950/70 p-4 rounded-xl border border-slate-800/90 font-mono">
                       {aiAnalysis}
                     </div>
                   )}
                 </div>
               </>
-            ) : (
-              /* Pre-calculation hint banner */
-              <div className="bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl p-8 text-center space-y-3">
-                <Zap className="w-8 h-8 text-cyan-500/60 mx-auto" />
-                <p className="text-slate-400 text-sm">
-                  Adjust the force slider or click <strong className="text-cyan-400">Execute Calculation</strong> to run the Python solver and trigger the buckling deflection animation.
-                </p>
-              </div>
             )}
 
           </div>
