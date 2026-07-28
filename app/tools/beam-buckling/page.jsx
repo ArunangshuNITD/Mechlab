@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation'; // Assuming Next.js App Router
 import { 
   Gauge, 
   Layers, 
@@ -14,46 +15,62 @@ import {
   Bot,
   Zap,
   Repeat,
-  Info,
   Sliders,
   Scale,
-  ShieldAlert
+  ShieldAlert,
+  Cpu,
+  Compass,
+  PlusCircle,
+  ExternalLink
 } from 'lucide-react';
 
 export default function BeamBucklingPage() {
+  const router = useRouter();
+
   // ---------------------------------------------------------------------------
-  // 1. STATE MANAGEMENT (3 Load Mode Tabs & Separate Input Parameters)
+  // 1. STATE MANAGEMENT & PRESETS
   // ---------------------------------------------------------------------------
   const [loadTab, setLoadTab] = useState('static'); // 'static' | 'fatigue' | 'impact'
-  const [diagramTab, setDiagramTab] = useState('deflection'); // 'deflection' | 'sfd' | 'bmd' | 'goodman'
+
+  const [selectedMaterial, setSelectedMaterial] = useState('steel_a36');
+  const [selectedShape, setSelectedShape] = useState('ibeam_w10x33');
+
+  // Standard Presets (These can be merged with User-Saved Items fetched from Database)
+  const materialPresets = {
+    steel_a36: { name: 'A36 Structural Steel', E_gpa: 200, S_y: 250, S_u: 400, S_e: 200 },
+    steel_s355: { name: 'S355 High Yield Steel', E_gpa: 210, S_y: 355, S_u: 510, S_e: 255 },
+    alum_6061: { name: 'Aluminum 6061-T6', E_gpa: 68.9, S_y: 276, S_u: 310, S_e: 96 },
+    titanium_gr5: { name: 'Titanium Grade 5 (Ti-6Al-4V)', E_gpa: 114, S_y: 880, S_u: 950, S_e: 510 }
+  };
+
+  const shapePresets = {
+    ibeam_w10x33: { name: 'I-Beam (W10x33 Profile)', I_cm4: 7110, A_cm2: 62.6, depth_mm: 247 },
+    rhs_150x100: { name: 'RHS (150x100x6mm Box)', I_cm4: 1020, A_cm2: 28.1, depth_mm: 150 },
+    pipe_114: { name: 'CHS Pipe (114.3x6mm Circular)', I_cm4: 228, A_cm2: 20.4, depth_mm: 114.3 },
+    solid_rect: { name: 'Solid Rectangular Bar (100x50mm)', I_cm4: 1041, A_cm2: 50.0, depth_mm: 100 }
+  };
 
   const [inputs, setInputs] = useState({
-    // Common Section & Material Parameters
+    // Common Geometry Parameters
     condition: 'pinned_pinned', // Boundary Condition key
-    E_gpa: 200,                 // Young's Modulus (GPa)
-    I_cm4: 800,                 // Second Moment of Area (cm⁴)
-    A_cm2: 40,                  // Cross-Sectional Area (cm²)
     L_m: 4.0,                   // Column Span Length (m)
 
-    // --- TAB 1: Static Load Parameters ---
-    P_static_kn: 50,            // Static Axial Load (kN)
-    eccentricity_mm: 8,         // Initial Load Eccentricity e (mm)
+    // --- Static Load Parameters ---
+    P_static_kn: 60,            // Static Axial Load (kN)
+    eccentricity_mm: 10,        // Load Eccentricity e (mm)
 
-    // --- TAB 2: Fatigue Load Parameters ---
-    P_mean_kn: 30,              // Cyclic Mean Load P_m (kN)
-    P_alt_kn: 25,               // Cyclic Alternating Load Amplitude P_a (kN)
-    ultimate_su_mpa: 450,       // Ultimate Tensile Strength S_u (MPa)
-    endurance_se_mpa: 225,      // Fatigue Endurance Limit S_e (MPa)
-    K_t: 1.2,                   // Stress Concentration Factor
+    // --- Fatigue Load Parameters ---
+    P_mean_kn: 35,              // Cyclic Mean Load P_m (kN)
+    P_alt_kn: 20,               // Cyclic Alternating Load Amplitude P_a (kN)
+    K_t: 1.3,                   // Stress Concentration Factor
 
-    // --- TAB 3: Dynamic Impact Load Parameters ---
-    drop_mass_kg: 250,          // Dropping Impact Mass (kg)
-    drop_h_mm: 50,              // Drop Height (mm)
+    // --- Dynamic Impact Load Parameters ---
+    drop_mass_kg: 300,          // Dropping Impact Mass (kg)
+    drop_h_mm: 40,              // Drop Height (mm)
   });
 
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
   const [error, setError] = useState('');
 
   // K-Factor mapping for column boundary conditions
@@ -64,7 +81,11 @@ export default function BeamBucklingPage() {
     fixed_free: 2.0
   };
 
-  // Generic Handler for Form Inputs
+  // Get current active material & shape specs
+  const activeMaterial = materialPresets[selectedMaterial] || materialPresets.steel_a36;
+  const activeShape = shapePresets[selectedShape] || shapePresets.ibeam_w10x33;
+
+  // Generic Handler for Load Inputs
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setInputs((prev) => ({
@@ -74,7 +95,7 @@ export default function BeamBucklingPage() {
   };
 
   // ---------------------------------------------------------------------------
-  // 2. COMPUTATIONS (Distinct Calculations Per Load Tab)
+  // 2. MATHEMATICAL & STRUCTURAL COMPUTATIONS
   // ---------------------------------------------------------------------------
   const activeResult = useMemo(() => {
     try {
@@ -83,100 +104,137 @@ export default function BeamBucklingPage() {
       const K = kFactors[inputs.condition] || 1.0;
       const L_effective = K * inputs.L_m; // meters
 
-      // Common SI Unit Conversions
-      const E_pa = inputs.E_gpa * 1e9;         // GPa to Pa
-      const I_m4 = inputs.I_cm4 * 1e-8;        // cm⁴ to m⁴
-      const A_m2 = inputs.A_cm2 * 1e-4;        // cm² to m²
+      // SI Unit Conversions from Active Presets
+      const E_pa = activeMaterial.E_gpa * 1e9;         // GPa to Pa
+      const S_y_pa = activeMaterial.S_y * 1e6;        // MPa to Pa
+      const I_m4 = activeShape.I_cm4 * 1e-8;          // cm⁴ to m⁴
+      const A_m2 = activeShape.A_cm2 * 1e-4;          // cm² to m²
+      const d_m = activeShape.depth_mm / 1000;        // mm to meters
+      const ecc_m = inputs.eccentricity_mm / 1000;
 
-      if (L_effective <= 0 || E_pa <= 0 || I_m4 <= 0 || A_m2 <= 0) {
+      if (L_effective <= 0 || E_pa <= 0 || I_m4 <= 0 || A_m2 <= 0 || d_m <= 0) {
         throw new Error("Geometric, material, and section parameters must be strictly greater than zero.");
       }
 
-      // Base Euler Critical Buckling Load (P_cr)
-      const P_cr_N = (Math.PI ** 2 * E_pa * I_m4) / (L_effective ** 2);
-      const P_cr_kn = P_cr_N / 1000;
+      // Section Modulus Z = I / (d/2) in m³
+      const Z_m3 = I_m4 / (d_m / 2);
 
       // Radius of Gyration & Slenderness
       const r_m = Math.sqrt(I_m4 / A_m2);
-      const slenderness = (L_effective / r_m).toFixed(1);
+      const slenderness = L_effective / r_m;
 
-      // --- 1. STATIC LOAD CALCULATIONS ---
+      // Critical Slenderness Transition λ_c = π * √(2 * E / S_y)
+      const slenderness_critical = Math.PI * Math.sqrt((2 * E_pa) / S_y_pa);
+
+      // Euler Critical Elastic Buckling Load (P_cr)
+      const P_cr_euler_N = (Math.PI ** 2 * E_pa * I_m4) / (L_effective ** 2);
+      const P_cr_euler_kn = P_cr_euler_N / 1000;
+
+      // Johnson Parabolic Buckling Load
+      let P_cr_governing_N = P_cr_euler_N;
+      let columnRegime = 'Long Column (Euler Buckling Governed)';
+
+      if (slenderness < slenderness_critical) {
+        columnRegime = 'Intermediate/Short Column (Johnson Yielding Governed)';
+        const sigma_cr_johnson = S_y_pa * (1 - (S_y_pa * (slenderness ** 2)) / (4 * (Math.PI ** 2) * E_pa));
+        P_cr_governing_N = sigma_cr_johnson * A_m2;
+      }
+
+      const P_cr_kn = P_cr_governing_N / 1000;
+
+      // --- 1. STATIC LOAD ANALYSIS ---
       const P_stat_N = inputs.P_static_kn * 1000;
       const static_fos = inputs.P_static_kn > 0 ? (P_cr_kn / inputs.P_static_kn) : 999;
-      const ecc_m = inputs.eccentricity_mm / 1000;
-      const secant_factor = P_cr_N > P_stat_N ? 1 / (1 - P_stat_N / P_cr_N) : 5.0;
-      const max_M_kNm = ((inputs.P_static_kn * ecc_m) * secant_factor);
-      const max_V_kn = (max_M_kNm / (inputs.L_m / 2 || 1));
-      const static_stress_mpa = (P_stat_N / A_m2) / 1e6;
+      
+      const secant_static = P_cr_governing_N > P_stat_N ? 1 / (1 - P_stat_N / P_cr_governing_N) : 5.0;
+      const max_M_static_kNm = (inputs.P_static_kn * ecc_m) * secant_static;
+      const max_V_static_kn = max_M_static_kNm / (inputs.L_m / 2 || 1);
 
-      // --- 2. FATIGUE LOAD CALCULATIONS (Modified Goodman Criterion) ---
+      const static_axial_stress_mpa = (P_stat_N / A_m2) / 1e6;
+      const static_bending_stress_mpa = ((max_M_static_kNm * 1000) / Z_m3) / 1e6;
+      const static_combined_stress_mpa = static_axial_stress_mpa + static_bending_stress_mpa;
+
+      // --- 2. FATIGUE LOAD ANALYSIS ---
       const P_mean_N = inputs.P_mean_kn * 1000;
       const P_alt_N = inputs.P_alt_kn * 1000;
+      const P_peak_fatigue_N = P_mean_N + P_alt_N;
 
-      const sigma_mean_mpa = (P_mean_N / A_m2) / 1e6;
-      const sigma_alt_mpa = (inputs.K_t * (P_alt_N / A_m2)) / 1e6;
+      const secant_fatigue = P_cr_governing_N > P_peak_fatigue_N ? 1 / (1 - P_peak_fatigue_N / P_cr_governing_N) : 5.0;
+      const max_M_fatigue_kNm = ((P_peak_fatigue_N / 1000) * ecc_m) * secant_fatigue;
+      const max_V_fatigue_kn = max_M_fatigue_kNm / (inputs.L_m / 2 || 1);
 
-      const S_u = inputs.ultimate_su_mpa;
-      const S_e = inputs.endurance_se_mpa;
+      const sigma_mean_axial = (P_mean_N / A_m2) / 1e6;
+      const sigma_mean_bending = (((P_mean_N / 1000) * ecc_m * secant_fatigue) * 1000 / Z_m3) / 1e6;
+      const sigma_mean_total_mpa = sigma_mean_axial + sigma_mean_bending;
 
-      // Goodman Utilization: (σ_a / S_e) + (σ_m / S_u)
+      const sigma_alt_axial = (P_alt_N / A_m2) / 1e6;
+      const sigma_alt_bending = (((P_alt_N / 1000) * ecc_m * secant_fatigue) * 1000 / Z_m3) / 1e6;
+      const sigma_alt_total_mpa = inputs.K_t * (sigma_alt_axial + sigma_alt_bending);
+
+      const S_u = activeMaterial.S_u;
+      const S_e = activeMaterial.S_e;
+
       const goodman_utilization = (S_e > 0 && S_u > 0)
-        ? (sigma_alt_mpa / S_e) + (sigma_mean_mpa / S_u)
+        ? (sigma_alt_total_mpa / S_e) + (sigma_mean_total_mpa / S_u)
         : 0;
 
       const fatigue_fos = goodman_utilization > 0 ? (1 / goodman_utilization) : 999;
-      const peak_fatigue_load_kn = inputs.P_mean_kn + inputs.P_alt_kn;
 
-      // --- 3. DYNAMIC IMPACT LOAD CALCULATIONS ---
+      // --- 3. DYNAMIC IMPACT LOAD ANALYSIS ---
       const m_kg = inputs.drop_mass_kg;
-      const W_N = m_kg * 9.81; // Weight force in Newtons
+      const W_N = m_kg * 9.81;
       const h_m = inputs.drop_h_mm / 1000;
 
-      // Static axial displacement under the drop mass: δ_stat = (W * L) / (E * A)
       const delta_stat_m = (W_N * inputs.L_m) / (E_pa * A_m2);
-
-      // Dynamic Amplification Factor: DAF = 1 + √(1 + (2 * h) / δ_stat)
-      const daf = delta_stat_m > 0 
-        ? 1 + Math.sqrt(1 + (2 * h_m) / delta_stat_m) 
-        : 1.0;
+      const daf = delta_stat_m > 0 ? 1 + Math.sqrt(1 + (2 * h_m) / delta_stat_m) : 1.0;
 
       const P_impact_N = W_N * daf;
       const P_impact_kn = P_impact_N / 1000;
       const impact_fos = P_impact_kn > 0 ? (P_cr_kn / P_impact_kn) : 999;
-      const dynamic_stress_mpa = (P_impact_N / A_m2) / 1e6;
+
+      const secant_impact = P_cr_governing_N > P_impact_N ? 1 / (1 - P_impact_N / P_cr_governing_N) : 5.0;
+      const max_M_impact_kNm = (P_impact_kn * ecc_m) * secant_impact;
+      const max_V_impact_kn = max_M_impact_kNm / (inputs.L_m / 2 || 1);
+
+      const impact_axial_stress_mpa = (P_impact_N / A_m2) / 1e6;
+      const impact_bending_stress_mpa = ((max_M_impact_kNm * 1000) / Z_m3) / 1e6;
+      const impact_combined_stress_mpa = impact_axial_stress_mpa + impact_bending_stress_mpa;
 
       return {
         P_cr_kn: P_cr_kn.toFixed(1),
-        slenderness,
+        slenderness: slenderness.toFixed(1),
+        slenderness_critical: slenderness_critical.toFixed(1),
+        columnRegime,
         r_mm: (r_m * 1000).toFixed(1),
+        Z_cm3: (Z_m3 * 1e6).toFixed(1),
 
-        // Static Results
         static_fos: static_fos.toFixed(2),
-        max_M_kNm: max_M_kNm.toFixed(2),
-        max_V_kn: max_V_kn.toFixed(2),
-        static_stress_mpa: static_stress_mpa.toFixed(1),
+        max_M_static_kNm: max_M_static_kNm.toFixed(2),
+        max_V_static_kn: max_V_static_kn.toFixed(2),
+        static_combined_stress_mpa: static_combined_stress_mpa.toFixed(1),
 
-        // Fatigue Results
-        sigma_mean_mpa: sigma_mean_mpa.toFixed(1),
-        sigma_alt_mpa: sigma_alt_mpa.toFixed(1),
+        sigma_mean_mpa: sigma_mean_total_mpa.toFixed(1),
+        sigma_alt_mpa: sigma_alt_total_mpa.toFixed(1),
         goodman_utilization: goodman_utilization.toFixed(2),
         fatigue_fos: fatigue_fos.toFixed(2),
-        peak_fatigue_load_kn: peak_fatigue_load_kn.toFixed(1),
+        max_M_fatigue_kNm: max_M_fatigue_kNm.toFixed(2),
+        max_V_fatigue_kn: max_V_fatigue_kn.toFixed(2),
 
-        // Impact Results
         delta_stat_mm: (delta_stat_m * 1000).toFixed(3),
         daf: daf.toFixed(2),
         P_impact_kn: P_impact_kn.toFixed(1),
         impact_fos: impact_fos.toFixed(2),
-        dynamic_stress_mpa: dynamic_stress_mpa.toFixed(1),
+        max_M_impact_kNm: max_M_impact_kNm.toFixed(2),
+        max_V_impact_kn: max_V_impact_kn.toFixed(2),
+        impact_combined_stress_mpa: impact_combined_stress_mpa.toFixed(1),
       };
     } catch (err) {
       setError(err.message);
       return null;
     }
-  }, [inputs]);
+  }, [inputs, selectedMaterial, selectedShape]);
 
-  // Operational Condition Failure Flags based on current active load tab
+  // Operational Condition Failure Flag
   const isFailed = useMemo(() => {
     if (!activeResult) return false;
     if (loadTab === 'static') {
@@ -189,8 +247,20 @@ export default function BeamBucklingPage() {
     return false;
   }, [loadTab, inputs, activeResult]);
 
+  // Active Mode Shear and Bending Values
+  const activeMomentsAndShears = useMemo(() => {
+    if (!activeResult) return { M_max: '0', V_max: '0' };
+    if (loadTab === 'static') {
+      return { M_max: activeResult.max_M_static_kNm, V_max: activeResult.max_V_static_kn };
+    } else if (loadTab === 'fatigue') {
+      return { M_max: activeResult.max_M_fatigue_kNm, V_max: activeResult.max_V_fatigue_kn };
+    } else {
+      return { M_max: activeResult.max_M_impact_kNm, V_max: activeResult.max_V_impact_kn };
+    }
+  }, [loadTab, activeResult]);
+
   // ---------------------------------------------------------------------------
-  // 3. SVG PATH GENERATORS FOR GRAPHICAL DIAGRAMS
+  // 3. SVG DIAGRAM PATH GENERATORS
   // ---------------------------------------------------------------------------
   const getDeflectionPath = (height) => {
     const isBuckled = isFailed;
@@ -209,7 +279,7 @@ export default function BeamBucklingPage() {
 
   const getSFDPath = (height) => {
     const midY = height / 2;
-    const v = Math.min(parseFloat(activeResult?.max_V_kn || 0) * 1.5, 30);
+    const v = Math.min(parseFloat(activeMomentsAndShears.V_max || 0) * 2, 30);
     const line = `M 0 ${midY} L 0 ${midY - v} L 250 ${midY - v} L 250 ${midY + v} L 500 ${midY + v} L 500 ${midY}`;
     const area = `${line} Z`;
     return { line, area };
@@ -217,58 +287,52 @@ export default function BeamBucklingPage() {
 
   const getBMDPath = (height) => {
     const midY = height / 2;
-    const m = Math.min(parseFloat(activeResult?.max_M_kNm || 0) * 2, 35);
+    const m = Math.min(parseFloat(activeMomentsAndShears.M_max || 0) * 2.2, 32);
     const line = `M 0 ${midY} Q 250 ${midY + m * 2}, 500 ${midY}`;
     const area = `M 0 ${midY} Q 250 ${midY + m * 2}, 500 ${midY} Z`;
     return { line, area };
   };
 
-  // ---------------------------------------------------------------------------
-  // 4. AI STRUCTURAL ADVISOR INTEGRATION
-  // ---------------------------------------------------------------------------
+  // AI Analysis Handler
   const fetchAiAnalysis = async () => {
     setAiLoading(true);
-    setAiError('');
     setAiAnalysis('');
 
     try {
       setTimeout(() => {
-        let title = "";
-        let details = "";
-        let recommendation = "";
+        let modeDetails = "";
+        let recs = "";
 
         if (loadTab === 'static') {
-          title = "STATIC BUCKLING ASSESSMENT";
-          details = `Applied static load of ${inputs.P_static_kn} kN vs Critical Euler Load (P_cr) of ${activeResult.P_cr_kn} kN. ` +
-                    `Static Factor of Safety is ${activeResult.static_fos}. Maximum induced bending moment is ${activeResult.max_M_kNm} kN·m.`;
-          recommendation = parseFloat(activeResult.static_fos) < 1.0 
-            ? "CRITICAL: Static axial force exceeds the elastic instability limit. Increase section moment of inertia (I) or shorten effective span length."
-            : "SAFE: Static load remains within stable buckling margins.";
+          modeDetails = `Static Load P = ${inputs.P_static_kn} kN | Critical Buckling Threshold = ${activeResult.P_cr_kn} kN (Static FoS: ${activeResult.static_fos}). ` +
+                        `Maximum Bending Moment M_max = ${activeResult.max_M_static_kNm} kN·m | Shear V_max = ${activeResult.max_V_static_kn} kN.`;
+          recs = parseFloat(activeResult.static_fos) < 1.0 
+            ? "CRITICAL STATIC FAILURE: Exceeds buckling load limit. Recommend choosing a stiffer profile from /myshapes or increasing inertia I."
+            : "SAFE STATIC STATE: Operating within elastic stability limits.";
         } else if (loadTab === 'fatigue') {
-          title = "GOODMAN FATIGUE ENDURANCE ASSESSMENT";
-          details = `Mean Stress (σ_m) = ${activeResult.sigma_mean_mpa} MPa | Alternating Stress (σ_a) = ${activeResult.sigma_alt_mpa} MPa.\n` +
-                    `Goodman Utilization Index is ${activeResult.goodman_utilization} (Fatigue FoS: ${activeResult.fatigue_fos}).`;
-          recommendation = parseFloat(activeResult.goodman_utilization) >= 1.0
-            ? "UNSAFE: Operating stress state exceeds the Goodman fatigue envelope. Risk of cyclic fatigue crack initiation. Reduce alternating amplitude or choose material with higher S_u and S_e."
-            : "SAFE: Stress state resides within the infinite fatigue life boundary.";
+          modeDetails = `Fatigue Mean Stress = ${activeResult.sigma_mean_mpa} MPa | Alternating Stress = ${activeResult.sigma_alt_mpa} MPa. ` +
+                        `Goodman Utilization = ${activeResult.goodman_utilization} / 1.0 (Fatigue FoS: ${activeResult.fatigue_fos}).`;
+          recs = parseFloat(activeResult.goodman_utilization) >= 1.0
+            ? "CRITICAL FATIGUE FAILURE: High cyclic amplitude risks fatigue failure. Select a material with higher Endurance Limit Se from /mymaterials."
+            : "SAFE FATIGUE STATE: Within the infinite fatigue life Goodman boundary.";
         } else {
-          title = "DYNAMIC DROP IMPACT ASSESSMENT";
-          details = `Drop Mass = ${inputs.drop_mass_kg} kg from ${inputs.drop_h_mm} mm height.\n` +
-                    `Dynamic Amplification Factor (DAF) = ${activeResult.daf}x. Transient Peak Load = ${activeResult.P_impact_kn} kN (Impact FoS: ${activeResult.impact_fos}).`;
-          recommendation = parseFloat(activeResult.impact_fos) < 1.0
-            ? "CRITICAL: Dynamic kinetic impact forces exceed critical buckling resistance. Add impact absorption dampers or increase cross-sectional stiffness."
-            : "SAFE: Dynamic impact transient force remains below critical buckling limits.";
+          modeDetails = `Impact Mass = ${inputs.drop_mass_kg} kg dropped from ${inputs.drop_h_mm} mm height. ` +
+                        `DAF = ${activeResult.daf}x spiking force to ${activeResult.P_impact_kn} kN (Impact FoS: ${activeResult.impact_fos}).`;
+          recs = parseFloat(activeResult.impact_fos) < 1.0
+            ? "CRITICAL DYNAMIC FAILURE: Dynamic dynamic shock causes instantaneous buckling. Recommend dynamic dampening or section reinforcement."
+            : "SAFE DYNAMIC STATE: Transient impact load remains within elastic limits.";
         }
 
         setAiAnalysis(
-          `**GEMINI ADVISOR - ${title}**\n\n` +
-          `• **Diagnostic Summary:** ${details}\n\n` +
-          `• **Engineering Advisory:** ${recommendation}`
+          `**GEMINI STRUCTURAL DIAGNOSTIC & REGIME ADVISORY**\n\n` +
+          `• **Member Profile:** ${activeMaterial.name} | ${activeShape.name}\n` +
+          `• **Column Classification:** ${activeResult.columnRegime} (Slenderness λ = ${activeResult.slenderness} vs Critical Boundary λ_c = ${activeResult.slenderness_critical})\n\n` +
+          `• **Active ${loadTab.toUpperCase()} Mode Diagnostics:**\n  ${modeDetails}\n\n` +
+          `• **Engineering Recommendations:**\n  ${recs}`
         );
         setAiLoading(false);
       }, 600);
     } catch (err) {
-      setAiError('Failed to generate AI insights.');
       setAiLoading(false);
     }
   };
@@ -281,66 +345,133 @@ export default function BeamBucklingPage() {
         <header className="border-b border-slate-800 pb-4 flex flex-wrap justify-between items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-cyan-400 flex items-center gap-2">
-              <Layers className="w-6 h-6" /> Beam & Column Load Analyzer
+              <Layers className="w-6 h-6" /> Structural Buckling, Fatigue & Impact Studio
             </h1>
             <p className="text-slate-400 text-xs mt-1">
-              Multi-regime structural analysis platform for Static Euler Buckling, Goodman Cyclic Fatigue, and Dynamic Impact.
+              Live Deflection, SFD, BMD, and Goodman Fatigue diagrams on a single unified dashboard.
             </p>
           </div>
         </header>
 
-        {/* ------------------------------------------------------------------- */}
-        {/* 3 LOAD REGIME MODE SELECTION TABS                                   */}
-        {/* ------------------------------------------------------------------- */}
+        {/* Load Regime Mode Selection Tabs */}
         <div className="grid grid-cols-3 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 font-mono text-xs">
           <button
-            onClick={() => { setLoadTab('static'); setDiagramTab('deflection'); }}
+            onClick={() => setLoadTab('static')}
             className={`py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold transition-all ${
               loadTab === 'static'
                 ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
-            <Gauge className="w-4 h-4" /> 1. Static Load Tab
+            <Gauge className="w-4 h-4" /> 1. Static Load Regime
           </button>
 
           <button
-            onClick={() => { setLoadTab('fatigue'); setDiagramTab('goodman'); }}
+            onClick={() => setLoadTab('fatigue')}
             className={`py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold transition-all ${
               loadTab === 'fatigue'
                 ? 'bg-purple-500 text-slate-950 shadow-lg shadow-purple-500/20'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
-            <Repeat className="w-4 h-4" /> 2. Fatigue Load Tab
+            <Repeat className="w-4 h-4" /> 2. Fatigue Load Regime
           </button>
 
           <button
-            onClick={() => { setLoadTab('impact'); setDiagramTab('deflection'); }}
+            onClick={() => setLoadTab('impact')}
             className={`py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold transition-all ${
               loadTab === 'impact'
                 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
-            <Zap className="w-4 h-4" /> 3. Impact Load Tab
+            <Zap className="w-4 h-4" /> 3. Impact Load Regime
           </button>
         </div>
 
-        {/* Main 2-Column Workspace Grid */}
+        {/* Workspace 2-Column Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-          {/* Left Column: Parameter Inputs Deck (5 cols) */}
+          {/* Left Column: Controls & Presets (5 cols) */}
           <div className="lg:col-span-5 space-y-5">
             
-            {/* Common Section Parameters Card */}
+            {/* Database / Library Selection Card */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
               <h3 className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
-                <Sliders className="w-4 h-4 text-cyan-400" /> Member & Geometry Section Parameters
+                <Cpu className="w-4 h-4 text-cyan-400" /> Material & Cross-Section Library
+              </h3>
+
+              <div className="space-y-4 text-xs font-mono">
+                {/* Material Selection & Redirect */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="text-slate-400">Selected Material</label>
+                    <button
+                      onClick={() => router.push('/mymaterials')}
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+                    >
+                      <PlusCircle className="w-3 h-3" /> Manage / Add Materials <ExternalLink className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                  <select
+                    value={selectedMaterial}
+                    onChange={(e) => setSelectedMaterial(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-cyan-500 focus:outline-none"
+                  >
+                    {Object.entries(materialPresets).map(([key, mat]) => (
+                      <option key={key} value={key}>{mat.name}</option>
+                    ))}
+                  </select>
+
+                  {/* Quick Material Info Card */}
+                  <div className="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 text-[11px] grid grid-cols-2 gap-1 text-slate-400">
+                    <div>Modulus (E): <span className="text-slate-200">{activeMaterial.E_gpa} GPa</span></div>
+                    <div>Yield (S<sub>y</sub>): <span className="text-slate-200">{activeMaterial.S_y} MPa</span></div>
+                    <div>Tensile (S<sub>u</sub>): <span className="text-slate-200">{activeMaterial.S_u} MPa</span></div>
+                    <div>Endurance (S<sub>e</sub>): <span className="text-slate-200">{activeMaterial.S_e} MPa</span></div>
+                  </div>
+                </div>
+
+                {/* Cross-Section Selection & Redirect */}
+                <div className="space-y-2 pt-2 border-t border-slate-800/60">
+                  <div className="flex justify-between items-center">
+                    <label className="text-slate-400">Selected Geometry Profile</label>
+                    <button
+                      onClick={() => router.push('/myshapes')}
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+                    >
+                      <PlusCircle className="w-3 h-3" /> Manage / Add Shapes <ExternalLink className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                  <select
+                    value={selectedShape}
+                    onChange={(e) => setSelectedShape(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-cyan-500 focus:outline-none"
+                  >
+                    {Object.entries(shapePresets).map(([key, shape]) => (
+                      <option key={key} value={key}>{shape.name}</option>
+                    ))}
+                  </select>
+
+                  {/* Quick Shape Info Card */}
+                  <div className="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 text-[11px] grid grid-cols-2 gap-1 text-slate-400">
+                    <div>Inertia (I): <span className="text-slate-200">{activeShape.I_cm4} cm⁴</span></div>
+                    <div>Area (A): <span className="text-slate-200">{activeShape.A_cm2} cm²</span></div>
+                    <div>Outer Depth (d): <span className="text-slate-200">{activeShape.depth_mm} mm</span></div>
+                    <div>Modulus (Z): <span className="text-slate-200">{activeResult?.Z_cm3 || '-'} cm³</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Member Column Boundary & Length Inputs */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <h3 className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
+                <Sliders className="w-4 h-4 text-cyan-400" /> Column Setup Parameters
               </h3>
 
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                {/* End Support Condition */}
+                {/* Boundary condition */}
                 <div className="col-span-2">
                   <label className="block text-slate-400 mb-1">Boundary Condition (K)</label>
                   <select 
@@ -356,45 +487,9 @@ export default function BeamBucklingPage() {
                   </select>
                 </div>
 
-                {/* Young's Modulus E */}
-                <div>
-                  <label className="block text-slate-400 mb-1">E Modulus (GPa)</label>
-                  <input 
-                    type="number" 
-                    name="E_gpa" 
-                    value={inputs.E_gpa} 
-                    onChange={handleInputChange}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-cyan-500 focus:outline-none"
-                  />
-                </div>
-
-                {/* Moment of Inertia I */}
-                <div>
-                  <label className="block text-slate-400 mb-1">Inertia I (cm⁴)</label>
-                  <input 
-                    type="number" 
-                    name="I_cm4" 
-                    value={inputs.I_cm4} 
-                    onChange={handleInputChange}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-cyan-500 focus:outline-none"
-                  />
-                </div>
-
-                {/* Cross Section Area A */}
-                <div>
-                  <label className="block text-slate-400 mb-1">Area A (cm²)</label>
-                  <input 
-                    type="number" 
-                    name="A_cm2" 
-                    value={inputs.A_cm2} 
-                    onChange={handleInputChange}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-cyan-500 focus:outline-none"
-                  />
-                </div>
-
                 {/* Length L */}
-                <div>
-                  <label className="block text-slate-400 mb-1">Span Length L (m)</label>
+                <div className="col-span-2">
+                  <label className="block text-slate-400 mb-1">Column Span Length L (m)</label>
                   <input 
                     type="number" 
                     step="0.1"
@@ -407,7 +502,7 @@ export default function BeamBucklingPage() {
               </div>
             </div>
 
-            {/* TAB 1 INPUTS: STATIC LOAD PARAMETERS */}
+            {/* TAB 1: STATIC INPUTS */}
             {loadTab === 'static' && (
               <div className="bg-slate-900/60 border border-cyan-500/30 rounded-2xl p-5 space-y-4">
                 <h3 className="text-xs font-mono uppercase tracking-wider text-cyan-400 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
@@ -417,7 +512,7 @@ export default function BeamBucklingPage() {
                 <div className="space-y-4 text-xs font-mono">
                   <div>
                     <div className="flex justify-between text-slate-400 mb-1">
-                      <span>Static Axial Load (P<sub>static</sub>)</span>
+                      <span>Static Load (P<sub>static</sub>)</span>
                       <span className="text-cyan-400 font-bold">{inputs.P_static_kn} kN</span>
                     </div>
                     <input 
@@ -431,15 +526,12 @@ export default function BeamBucklingPage() {
                     />
                     <div className="flex justify-between text-[10px] text-slate-500 mt-1">
                       <span>0 kN</span>
-                      {activeResult && <span className="text-cyan-400 font-bold">P<sub>cr</sub>: {activeResult.P_cr_kn} kN</span>}
+                      {activeResult && <span className="text-cyan-400 font-bold">Gov. P<sub>cr</sub>: {activeResult.P_cr_kn} kN</span>}
                     </div>
                   </div>
 
                   <div>
-                    <div className="flex justify-between text-slate-400 mb-1">
-                      <span>Load Eccentricity (e)</span>
-                      <span className="text-cyan-400 font-bold">{inputs.eccentricity_mm} mm</span>
-                    </div>
+                    <label className="block text-slate-400 mb-1">Load Eccentricity e (mm)</label>
                     <input 
                       type="number" 
                       name="eccentricity_mm" 
@@ -452,11 +544,11 @@ export default function BeamBucklingPage() {
               </div>
             )}
 
-            {/* TAB 2 INPUTS: FATIGUE LOAD PARAMETERS */}
+            {/* TAB 2: FATIGUE INPUTS */}
             {loadTab === 'fatigue' && (
               <div className="bg-slate-900/60 border border-purple-500/30 rounded-2xl p-5 space-y-4">
                 <h3 className="text-xs font-mono uppercase tracking-wider text-purple-400 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
-                  <Repeat className="w-4 h-4 text-purple-400" /> Goodman Cyclic Fatigue Parameters
+                  <Repeat className="w-4 h-4 text-purple-400" /> Goodman Fatigue Parameters
                 </h3>
 
                 <div className="grid grid-cols-2 gap-3 text-xs font-mono">
@@ -472,7 +564,7 @@ export default function BeamBucklingPage() {
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Alt. Load P<sub>a</sub> (kN)</label>
+                    <label className="block text-slate-400 mb-1">Alt Load P<sub>a</sub> (kN)</label>
                     <input 
                       type="number" 
                       name="P_alt_kn" 
@@ -482,30 +574,8 @@ export default function BeamBucklingPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-slate-400 mb-1">Tensile S<sub>u</sub> (MPa)</label>
-                    <input 
-                      type="number" 
-                      name="ultimate_su_mpa" 
-                      value={inputs.ultimate_su_mpa} 
-                      onChange={handleInputChange}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-purple-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 mb-1">Endurance S<sub>e</sub> (MPa)</label>
-                    <input 
-                      type="number" 
-                      name="endurance_se_mpa" 
-                      value={inputs.endurance_se_mpa} 
-                      onChange={handleInputChange}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:border-purple-500 focus:outline-none"
-                    />
-                  </div>
-
                   <div className="col-span-2">
-                    <label className="block text-slate-400 mb-1">Stress Concentration K<sub>t</sub></label>
+                    <label className="block text-slate-400 mb-1">Stress Concentration Factor K<sub>t</sub></label>
                     <input 
                       type="number" 
                       step="0.1"
@@ -519,19 +589,16 @@ export default function BeamBucklingPage() {
               </div>
             )}
 
-            {/* TAB 3 INPUTS: DYNAMIC IMPACT PARAMETERS */}
+            {/* TAB 3: DYNAMIC IMPACT INPUTS */}
             {loadTab === 'impact' && (
               <div className="bg-slate-900/60 border border-amber-500/30 rounded-2xl p-5 space-y-4">
                 <h3 className="text-xs font-mono uppercase tracking-wider text-amber-400 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
-                  <Zap className="w-4 h-4 text-amber-400" /> Dynamic Impact Load Parameters
+                  <Zap className="w-4 h-4 text-amber-400" /> Dynamic Impact Parameters
                 </h3>
 
                 <div className="space-y-3 text-xs font-mono">
                   <div>
-                    <div className="flex justify-between text-slate-400 mb-1">
-                      <span>Impact Drop Mass (m)</span>
-                      <span className="text-amber-400 font-bold">{inputs.drop_mass_kg} kg</span>
-                    </div>
+                    <label className="block text-slate-400 mb-1">Impact Drop Mass (kg)</label>
                     <input 
                       type="number" 
                       name="drop_mass_kg" 
@@ -542,10 +609,7 @@ export default function BeamBucklingPage() {
                   </div>
 
                   <div>
-                    <div className="flex justify-between text-slate-400 mb-1">
-                      <span>Drop Height (h)</span>
-                      <span className="text-amber-400 font-bold">{inputs.drop_h_mm} mm</span>
-                    </div>
+                    <label className="block text-slate-400 mb-1">Drop Height (mm)</label>
                     <input 
                       type="number" 
                       name="drop_h_mm" 
@@ -560,104 +624,130 @@ export default function BeamBucklingPage() {
 
           </div>
 
-          {/* Right Column: Visualizer & Results (7 cols) */}
+          {/* Right Column: Unified Multi-Diagram Dashboard (7 cols) */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* Visualizer Header Controls */}
-            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-                <h4 className="text-xs font-mono uppercase text-slate-300 font-semibold flex items-center gap-2">
-                  <Gauge className="w-4 h-4 text-cyan-400" /> Real-time Graphical Visualizer
-                </h4>
+            {/* Structural Status Banner */}
+            {activeResult && (
+              <div className={`p-4 rounded-2xl border transition-all ${
+                isFailed
+                  ? 'bg-rose-950/40 border-rose-500/50 text-rose-300' 
+                  : 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+              } flex items-center justify-between`}>
+                <div className="space-y-0.5">
+                  <span className="text-[11px] font-mono uppercase text-slate-400">
+                    Active Mode Status ({loadTab.toUpperCase()})
+                  </span>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    {isFailed ? (
+                      <>
+                        <ShieldAlert className="w-5 h-5 text-rose-500 animate-bounce" /> 
+                        <span className="text-rose-400">LIMIT STATE EXCEEDED</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-5 h-5 text-emerald-400" /> 
+                        <span className="text-emerald-400 font-bold">STRUCTURALLY SAFE</span>
+                      </>
+                    )}
+                  </h3>
+                </div>
 
-                {/* Sub-view switcher */}
-                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
-                  {loadTab === 'fatigue' ? (
-                    <button
-                      onClick={() => setDiagramTab('goodman')}
-                      className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                        diagramTab === 'goodman' ? 'bg-purple-500 text-slate-950 font-bold' : 'text-slate-400'
-                      }`}
-                    >
-                      <Scale className="w-3.5 h-3.5" /> Goodman Diagram
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setDiagramTab('deflection')}
-                        className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                          diagramTab === 'deflection' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400'
-                        }`}
-                      >
-                        <Maximize2 className="w-3.5 h-3.5" /> Deflection Profile
-                      </button>
-                      <button
-                        onClick={() => setDiagramTab('sfd')}
-                        className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                          diagramTab === 'sfd' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'
-                        }`}
-                      >
-                        <BarChart2 className="w-3.5 h-3.5" /> SFD
-                      </button>
-                      <button
-                        onClick={() => setDiagramTab('bmd')}
-                        className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                          diagramTab === 'bmd' ? 'bg-purple-500 text-slate-950 font-bold' : 'text-slate-400'
-                        }`}
-                      >
-                        <TrendingUp className="w-3.5 h-3.5" /> BMD
-                      </button>
-                    </>
-                  )}
+                <div className="text-right font-mono">
+                  <div className="text-[10px] text-slate-400">Factor of Safety</div>
+                  <div className={`text-xl font-extrabold ${isFailed ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {loadTab === 'static' ? activeResult.static_fos : loadTab === 'fatigue' ? activeResult.fatigue_fos : activeResult.impact_fos}
+                  </div>
                 </div>
               </div>
+            )}
 
-              {/* Dynamic Visualizations */}
-              <div className="bg-slate-950 rounded-xl border border-slate-800 p-4 relative">
-                {diagramTab === 'deflection' && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-[11px] font-mono text-slate-400">
-                      <span>• Member Elastic Deflection y(x)</span>
-                      <span>Span: {inputs.L_m}m</span>
-                    </div>
-                    <div className="h-28 w-full relative flex items-center justify-center">
-                      <svg className="w-full h-full" viewBox="0 0 500 80" preserveAspectRatio="none">
-                        <line x1="0" y1="40" x2="500" y2="40" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
-                        <path
-                          d={getDeflectionPath(80)}
-                          fill="none"
-                          stroke={isFailed ? "#f43f5e" : loadTab === 'impact' ? "#f59e0b" : "#06b6d4"}
-                          strokeWidth="3"
-                          className="transition-all duration-300"
-                        />
-                      </svg>
-                    </div>
+            {/* SINGLE PAGE DIAGRAMS DASHBOARD */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-5">
+              <h4 className="text-xs font-mono uppercase text-slate-300 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
+                <Gauge className="w-4 h-4 text-cyan-400" /> Integrated Diagrams Dashboard
+              </h4>
+
+              <div className="space-y-4">
+                
+                {/* 1. Deflection Curve */}
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 shadow-inner space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono text-cyan-400">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <Maximize2 className="w-3.5 h-3.5" /> 1. Elastic Deflection Profile y(x)
+                    </span>
+                    <span className="text-slate-400">Span L = {inputs.L_m}m</span>
                   </div>
-                )}
+                  <div className="h-24 w-full relative flex items-center justify-center">
+                    <svg className="w-full h-full" viewBox="0 0 500 60" preserveAspectRatio="none">
+                      <line x1="0" y1="30" x2="500" y2="30" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
+                      <path
+                        d={getDeflectionPath(60)}
+                        fill="none"
+                        stroke={isFailed ? "#f43f5e" : loadTab === 'impact' ? "#f59e0b" : "#06b6d4"}
+                        strokeWidth="2.5"
+                        className="transition-all duration-300"
+                      />
+                    </svg>
+                  </div>
+                </div>
 
-                {diagramTab === 'goodman' && activeResult && (
-                  <div className="space-y-2 font-mono">
-                    <div className="flex justify-between text-[11px] text-purple-400">
-                      <span>• Modified Goodman Stress Diagram (σ_a vs σ_m)</span>
+                {/* 2. Shear Force Diagram (SFD) */}
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 shadow-inner space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono text-amber-400">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <BarChart2 className="w-3.5 h-3.5" /> 2. Shear Force Diagram (SFD)
+                    </span>
+                    <span>V<sub>max</sub> = {activeMomentsAndShears.V_max} kN</span>
+                  </div>
+                  <div className="h-24 w-full relative flex items-center justify-center">
+                    <svg className="w-full h-full" viewBox="0 0 500 60" preserveAspectRatio="none">
+                      <line x1="0" y1="30" x2="500" y2="30" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
+                      <path d={getSFDPath(60).area} fill="#f59e0b" opacity="0.25" />
+                      <path d={getSFDPath(60).line} fill="none" stroke="#f59e0b" strokeWidth="2" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* 3. Bending Moment Diagram (BMD) */}
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 shadow-inner space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono text-purple-400">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <TrendingUp className="w-3.5 h-3.5" /> 3. Bending Moment Diagram (BMD)
+                    </span>
+                    <span>M<sub>max</sub> = {activeMomentsAndShears.M_max} kN·m</span>
+                  </div>
+                  <div className="h-24 w-full relative flex items-center justify-center">
+                    <svg className="w-full h-full" viewBox="0 0 500 60" preserveAspectRatio="none">
+                      <line x1="0" y1="30" x2="500" y2="30" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
+                      <path d={getBMDPath(60).area} fill="#a855f7" opacity="0.25" />
+                      <path d={getBMDPath(60).line} fill="none" stroke="#a855f7" strokeWidth="2" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* 4. Goodman Fatigue Plot */}
+                {activeResult && (
+                  <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 shadow-inner space-y-1 font-mono">
+                    <div className="flex justify-between text-[11px] text-purple-300">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <Scale className="w-3.5 h-3.5 text-purple-400" /> 4. Modified Goodman Diagram (&sigma;_a vs &sigma;_m)
+                      </span>
                       <span>Index: {activeResult.goodman_utilization}</span>
                     </div>
-                    <div className="h-40 w-full relative flex items-center justify-center pt-2">
-                      <svg className="w-full h-full overflow-visible" viewBox="0 0 300 120">
-                        {/* Grid & Axes */}
-                        <line x1="30" y1="100" x2="280" y2="100" stroke="#475569" strokeWidth="1.5" />
-                        <line x1="30" y1="10" x2="30" y2="100" stroke="#475569" strokeWidth="1.5" />
+                    <div className="h-32 w-full relative flex items-center justify-center pt-2">
+                      <svg className="w-full h-full overflow-visible" viewBox="0 0 300 110">
+                        <line x1="30" y1="90" x2="280" y2="90" stroke="#475569" strokeWidth="1.5" />
+                        <line x1="30" y1="10" x2="30" y2="90" stroke="#475569" strokeWidth="1.5" />
 
-                        {/* Labels */}
-                        <text x="280" y="115" fill="#94a3b8" fontSize="8" textAnchor="end">σ_mean (S_u = {inputs.ultimate_su_mpa}MPa)</text>
-                        <text x="10" y="15" fill="#94a3b8" fontSize="8" transform="rotate(-90 15,20)">σ_alt (S_e = {inputs.endurance_se_mpa}MPa)</text>
+                        <text x="280" y="105" fill="#94a3b8" fontSize="8" textAnchor="end">&sigma;_m (S_u = {activeMaterial.S_u} MPa)</text>
+                        <text x="10" y="15" fill="#94a3b8" fontSize="8" transform="rotate(-90 15,20)">&sigma;_a (S_e = {activeMaterial.S_e} MPa)</text>
 
-                        {/* Goodman Line Boundary */}
-                        <line x1="30" y1="20" x2="250" y2="100" stroke="#a855f7" strokeWidth="2" strokeDasharray="3 3" />
+                        <line x1="30" y1="20" x2="250" y2="90" stroke="#a855f7" strokeWidth="2" strokeDasharray="3 3" />
 
-                        {/* Operating Stress Point */}
                         {(() => {
-                          const cx = 30 + Math.min((parseFloat(activeResult.sigma_mean_mpa) / (inputs.ultimate_su_mpa || 1)) * 220, 240);
-                          const cy = 100 - Math.min((parseFloat(activeResult.sigma_alt_mpa) / (inputs.endurance_se_mpa || 1)) * 80, 90);
+                          const cx = 30 + Math.min((parseFloat(activeResult.sigma_mean_mpa) / (activeMaterial.S_u || 1)) * 220, 240);
+                          const cy = 90 - Math.min((parseFloat(activeResult.sigma_alt_mpa) / (activeMaterial.S_e || 1)) * 70, 80);
                           return (
                             <>
                               <circle cx={cx} cy={cy} r="5" fill={isFailed ? '#f43f5e' : '#22c55e'} />
@@ -672,41 +762,10 @@ export default function BeamBucklingPage() {
                   </div>
                 )}
 
-                {diagramTab === 'sfd' && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-[11px] font-mono text-amber-400">
-                      <span>• Shear Force Diagram (SFD)</span>
-                      <span>V_max = {activeResult?.max_V_kn} kN</span>
-                    </div>
-                    <div className="h-28 w-full relative flex items-center justify-center">
-                      <svg className="w-full h-full" viewBox="0 0 500 80" preserveAspectRatio="none">
-                        <line x1="0" y1="40" x2="500" y2="40" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
-                        <path d={getSFDPath(80).area} fill="#f59e0b" opacity="0.25" />
-                        <path d={getSFDPath(80).line} fill="none" stroke="#f59e0b" strokeWidth="2" />
-                      </svg>
-                    </div>
-                  </div>
-                )}
-
-                {diagramTab === 'bmd' && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-[11px] font-mono text-purple-400">
-                      <span>• Bending Moment Diagram (BMD)</span>
-                      <span>M_max = {activeResult?.max_M_kNm} kN·m</span>
-                    </div>
-                    <div className="h-28 w-full relative flex items-center justify-center">
-                      <svg className="w-full h-full" viewBox="0 0 500 80" preserveAspectRatio="none">
-                        <line x1="0" y1="40" x2="500" y2="40" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
-                        <path d={getBMDPath(80).area} fill="#a855f7" opacity="0.25" />
-                        <path d={getBMDPath(80).line} fill="none" stroke="#a855f7" strokeWidth="2" />
-                      </svg>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* Error Display */}
+            {/* Error Message */}
             {error && (
               <div className="bg-red-950/40 border border-red-500/50 p-4 rounded-xl text-red-400 text-xs flex items-center gap-3">
                 <AlertTriangle className="w-5 h-5 shrink-0" />
@@ -714,108 +773,42 @@ export default function BeamBucklingPage() {
               </div>
             )}
 
-            {/* Status & Results Section */}
+            {/* Computed Metrics Section */}
             {activeResult && (
               <>
-                {/* Status Banner */}
-                <div className={`p-5 rounded-2xl border transition-all ${
-                  isFailed
-                    ? 'bg-rose-950/40 border-rose-500/50 text-rose-300' 
-                    : 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                } flex items-center justify-between`}>
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono uppercase text-slate-400">
-                      Active Mode Status ({loadTab.toUpperCase()})
-                    </span>
-                    <h3 className="text-xl font-bold flex items-center gap-2">
-                      {isFailed ? (
-                        <>
-                          <ShieldAlert className="w-6 h-6 text-rose-500 animate-bounce" /> 
-                          <span className="text-rose-400">LIMIT STATE EXCEEDED</span>
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-6 h-6 text-emerald-400" /> 
-                          <span className="text-emerald-400 font-bold">STRUCTURALLY SAFE</span>
-                        </>
-                      )}
-                    </h3>
+                <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl flex items-center justify-between font-mono text-xs">
+                  <div className="flex items-center gap-2.5 text-cyan-400">
+                    <Compass className="w-4 h-4 shrink-0" />
+                    <span>Column Classification: <strong className="text-white">{activeResult.columnRegime}</strong></span>
                   </div>
-
-                  <div className="text-right font-mono">
-                    <div className="text-xs text-slate-400">Factor of Safety</div>
-                    <div className={`text-2xl font-extrabold ${isFailed ? 'text-rose-400' : 'text-emerald-400'}`}>
-                      {loadTab === 'static' ? activeResult.static_fos : loadTab === 'fatigue' ? activeResult.fatigue_fos : activeResult.impact_fos}
-                    </div>
+                  <div className="text-slate-400">
+                    &lambda; = {activeResult.slenderness} | &lambda;<sub>c</sub> = {activeResult.slenderness_critical}
                   </div>
                 </div>
 
-                {/* Tab-Specific Results Metrics Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
-                  
-                  {/* Common Metric */}
                   <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                    <span className="text-slate-500 block">Critical Euler (P<sub>cr</sub>)</span>
+                    <span className="text-slate-500 block">Gov. Buckling Load (P<sub>cr</sub>)</span>
                     <span className="text-cyan-400 text-sm font-bold">{activeResult.P_cr_kn} kN</span>
                   </div>
 
-                  {/* Mode-Dependent Metrics */}
-                  {loadTab === 'static' && (
-                    <>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Max Moment (M<sub>max</sub>)</span>
-                        <span className="text-purple-400 text-sm font-bold">{activeResult.max_M_kNm} kN·m</span>
-                      </div>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Axial Stress</span>
-                        <span className="text-slate-200 text-sm font-bold">{activeResult.static_stress_mpa} MPa</span>
-                      </div>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Slenderness (&lambda;)</span>
-                        <span className="text-slate-200 text-sm font-bold">{activeResult.slenderness}</span>
-                      </div>
-                    </>
-                  )}
+                  <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
+                    <span className="text-slate-500 block">Max Bending (M<sub>max</sub>)</span>
+                    <span className="text-purple-400 text-sm font-bold">{activeMomentsAndShears.M_max} kN·m</span>
+                  </div>
 
-                  {loadTab === 'fatigue' && (
-                    <>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Mean Stress (σ<sub>m</sub>)</span>
-                        <span className="text-purple-400 text-sm font-bold">{activeResult.sigma_mean_mpa} MPa</span>
-                      </div>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Alt Stress (σ<sub>a</sub>)</span>
-                        <span className="text-purple-400 text-sm font-bold">{activeResult.sigma_alt_mpa} MPa</span>
-                      </div>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Goodman Index</span>
-                        <span className={`text-sm font-bold ${isFailed ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {activeResult.goodman_utilization} / 1.0
-                        </span>
-                      </div>
-                    </>
-                  )}
+                  <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
+                    <span className="text-slate-500 block">Max Shear (V<sub>max</sub>)</span>
+                    <span className="text-amber-400 text-sm font-bold">{activeMomentsAndShears.V_max} kN</span>
+                  </div>
 
-                  {loadTab === 'impact' && (
-                    <>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">DAF Multiplier</span>
-                        <span className="text-amber-400 text-sm font-bold">{activeResult.daf}x</span>
-                      </div>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Peak Impact Load</span>
-                        <span className="text-amber-400 text-sm font-bold">{activeResult.P_impact_kn} kN</span>
-                      </div>
-                      <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
-                        <span className="text-slate-500 block">Peak Stress</span>
-                        <span className="text-slate-200 text-sm font-bold">{activeResult.dynamic_stress_mpa} MPa</span>
-                      </div>
-                    </>
-                  )}
-
+                  <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl">
+                    <span className="text-slate-500 block">Section Modulus (Z)</span>
+                    <span className="text-slate-200 text-sm font-bold">{activeResult.Z_cm3} cm³</span>
+                  </div>
                 </div>
 
-                {/* AI Structural Advisor */}
+                {/* Gemini AI Advisor Section */}
                 <div className="bg-slate-900/80 border border-cyan-500/30 rounded-2xl p-5 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
