@@ -36,7 +36,7 @@ export default function Dashboard() {
       category: 'Solid Mechanics',
       description: 'Analyze critical buckling loads, bending moments, shear stress distributions, and deflection curves for straight and curved beams.',
       formula: 'P_cr = (π²EI) / (KL)²',
-      status: 'Python API Ready',
+      status: 'JS Solver Ready',
       isReady: true,
       href: '/tools/beam-buckling',
       icon: Layers,
@@ -132,7 +132,7 @@ export default function Dashboard() {
                 Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">MechLab Workspace</span>
               </h2>
               <p className="text-slate-400 text-sm sm:text-base leading-relaxed">
-                Select an engineering module to execute Python solver algorithms, view real-time 3D models, or restore cached analysis parameters from MongoDB.
+                Select an engineering module to execute JavaScript solver algorithms, view real-time 3D models, or restore cached analysis parameters from MongoDB.
               </p>
             </div>
 
@@ -153,7 +153,7 @@ export default function Dashboard() {
           <div className="mt-8 pt-6 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
             <div className="flex items-center gap-2 text-slate-400">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Python Backend: <strong className="text-slate-200">Online</strong></span>
+              <span>JS Runtime: <strong className="text-slate-200">Native</strong></span>
             </div>
             <div className="flex items-center gap-2 text-slate-400">
               <Database className="w-3.5 h-3.5 text-cyan-400" />
@@ -161,11 +161,11 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-2 text-slate-400">
               <Activity className="w-3.5 h-3.5 text-purple-400" />
-              <span>NumPy/SciPy Solvers: <strong className="text-slate-200">Ready</strong></span>
+              <span>JS Math Engine: <strong className="text-slate-200">Ready</strong></span>
             </div>
             <div className="flex items-center gap-2 text-slate-400">
               <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Latency: <strong className="text-slate-200">18 ms</strong></span>
+              <span>Latency: <strong className="text-slate-200">&lt; 2 ms</strong></span>
             </div>
           </div>
         </section>

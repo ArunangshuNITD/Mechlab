@@ -15,11 +15,15 @@ import {
   ArrowRight,
   Gauge,
   Sparkles,
-  Bot
+  Bot,
+  Layers,
+  TrendingUp,
+  BarChart2,
+  Maximize2
 } from 'lucide-react';
 
 export default function BeamBucklingPage() {
-  // Input parameters (P_kn starts at 0 for straight state)
+  // Input parameters
   const [inputs, setInputs] = useState({
     E_gpa: 210,        // Young's Modulus (Structural Steel)
     I_cm4: 1620,       // Moment of Inertia
@@ -28,6 +32,9 @@ export default function BeamBucklingPage() {
     P_kn: 0,           // Initial applied load = 0 kN (Straight beam)
     condition: 'pinned_pinned'
   });
+
+  // Diagram View State: 'stacked' | 'deflection' | 'sfd' | 'bmd'
+  const [activeTab, setActiveTab] = useState('stacked');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -38,7 +45,7 @@ export default function BeamBucklingPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
 
-  // Real-time local calculation engine for smooth animations and instant feedback
+  // Real-time local calculation engine for smooth animations, SFD, and BMD
   const computedData = useMemo(() => {
     const E = (Number(inputs.E_gpa) || 0) * 1e9;  // Pa
     const I = (Number(inputs.I_cm4) || 0) * 1e-8; // m4
@@ -70,28 +77,48 @@ export default function BeamBucklingPage() {
     const isBuckled = P > 0 && P >= P_cr_kn;
     const safety_factor = P > 0 ? (P_cr_kn / P).toFixed(2) : "∞";
 
-    // Generate deflection curve points (50 points along span)
+    // Estimated mid-span deflection amplitude for P-delta effects (in meters)
+    const loadRatio = P / P_cr_kn;
+    const delta_max_m = P > 0 ? Math.min(Math.max(loadRatio * 0.05 * L, 0.005), 0.15 * L) : 0;
+
+    // Generate continuous points along span for Deflection, SFD (V), and BMD (M)
     const points = [];
-    const numPoints = 50;
+    const numPoints = 60;
+    let max_M_kNm = 0;
+    let max_V_kn = 0;
+
     for (let i = 0; i < numPoints; i++) {
       const x_ratio = i / (numPoints - 1);
-      let deflection = 0;
+      const x = x_ratio * L;
+      let deflection = 0; // Normalized deflection (0 to 1)
+      let moment_kNm = 0; // Internal Bending Moment M(x) = P * y(x)
+      let shear_kn = 0;    // Internal Shear Force V(x) = dM/dx
 
       if (P > 0) {
-        // Support-condition specific mode shapes
         if (inputs.condition === 'fixed_fixed') {
           deflection = 0.5 * (1 - Math.cos(2 * Math.PI * x_ratio));
+          moment_kNm = P * delta_max_m * Math.cos(2 * Math.PI * x_ratio);
+          shear_kn = -P * delta_max_m * (2 * Math.PI / L) * Math.sin(2 * Math.PI * x_ratio);
         } else if (inputs.condition === 'fixed_free') {
           deflection = 1 - Math.cos((Math.PI * x_ratio) / 2);
+          moment_kNm = P * delta_max_m * Math.cos((Math.PI * x_ratio) / 2);
+          shear_kn = -P * delta_max_m * (Math.PI / (2 * L)) * Math.sin((Math.PI * x_ratio) / 2);
         } else if (inputs.condition === 'fixed_pinned') {
           deflection = 0.5 * (1 - Math.cos(1.43 * Math.PI * x_ratio));
+          moment_kNm = P * delta_max_m * Math.cos(1.43 * Math.PI * x_ratio);
+          shear_kn = -P * delta_max_m * (1.43 * Math.PI / L) * Math.sin(1.43 * Math.PI * x_ratio);
         } else {
           // pinned_pinned
           deflection = Math.sin(Math.PI * x_ratio);
+          moment_kNm = P * delta_max_m * Math.sin(Math.PI * x_ratio);
+          shear_kn = P * delta_max_m * (Math.PI / L) * Math.cos(Math.PI * x_ratio);
         }
       }
 
-      points.push({ x_ratio, deflection });
+      if (Math.abs(moment_kNm) > max_M_kNm) max_M_kNm = Math.abs(moment_kNm);
+      if (Math.abs(shear_kn) > max_V_kn) max_V_kn = Math.abs(shear_kn);
+
+      points.push({ x_ratio, x, deflection, moment_kNm, shear_kn });
     }
 
     return {
@@ -103,11 +130,12 @@ export default function BeamBucklingPage() {
       K_factor: K,
       isBuckled,
       safety_factor,
+      max_M_kNm: max_M_kNm.toFixed(2),
+      max_V_kn: max_V_kn.toFixed(2),
       curve_points: points
     };
   }, [inputs]);
 
-  // Use Python backend result if available, otherwise fallback to local real-time computation
   const activeResult = pythonResult || computedData;
 
   const handleInputChange = (e) => {
@@ -116,7 +144,6 @@ export default function BeamBucklingPage() {
       ...prev, 
       [name]: value === '' ? '' : (name === 'condition' ? value : Number(value)) 
     }));
-    // Reset server python result on input edit so real-time computation takes over
     if (pythonResult) setPythonResult(null);
   };
 
@@ -136,8 +163,7 @@ export default function BeamBucklingPage() {
         setPythonResult(data);
       }
     } catch (err) {
-      // Fallback silently to computedData on API unavailability
-      setError("Backend server API offline. Using real-time calculation client.");
+      setError("Backend server API offline. Using real-time calculation engine.");
     } finally {
       setLoading(false);
     }
@@ -181,18 +207,47 @@ export default function BeamBucklingPage() {
     setAiError(null);
   };
 
-  // Compute animated SVG path string dynamically
-  const getSvgPathString = () => {
-    if (!activeResult || !activeResult.curve_points) return "M 0 50 L 500 50";
-
+  // SVG Helper Generators
+  const getDeflectionPath = (height = 80) => {
+    if (!activeResult || !activeResult.curve_points) return "M 0 40 L 500 40";
     const loadRatio = inputs.P_kn / (parseFloat(activeResult.P_cr_kn) || 1);
-    const amplitude = inputs.P_kn > 0 ? Math.min(Math.max(loadRatio * 28, 6), 42) : 0;
+    const amp = inputs.P_kn > 0 ? Math.min(Math.max(loadRatio * 22, 5), 32) : 0;
 
     return activeResult.curve_points.reduce((acc, pt, idx) => {
       const x = pt.x_ratio * 500;
-      const y = 50 - (pt.deflection * amplitude);
+      const y = (height / 2) - (pt.deflection * amp);
       return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
     }, '');
+  };
+
+  const getSFDPath = (height = 80) => {
+    if (!activeResult || !activeResult.curve_points) return { line: "M 0 40 L 500 40", area: "M 0 40 L 500 40 Z" };
+    const maxV = parseFloat(activeResult.max_V_kn) || 1;
+    const midY = height / 2;
+
+    const linePath = activeResult.curve_points.reduce((acc, pt, idx) => {
+      const x = pt.x_ratio * 500;
+      const y = midY - (pt.shear_kn / maxV) * 28;
+      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+    }, '');
+
+    const areaPath = `${linePath} L 500 ${midY} L 0 ${midY} Z`;
+    return { line: linePath, area: areaPath };
+  };
+
+  const getBMDPath = (height = 80) => {
+    if (!activeResult || !activeResult.curve_points) return { line: "M 0 40 L 500 40", area: "M 0 40 L 500 40 Z" };
+    const maxM = parseFloat(activeResult.max_M_kNm) || 1;
+    const midY = height / 2;
+
+    const linePath = activeResult.curve_points.reduce((acc, pt, idx) => {
+      const x = pt.x_ratio * 500;
+      const y = midY + (pt.moment_kNm / maxM) * 28; // Standard sign convention
+      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+    }, '');
+
+    const areaPath = `${linePath} L 500 ${midY} L 0 ${midY} Z`;
+    return { line: linePath, area: areaPath };
   };
 
   const isBuckled = activeResult?.isBuckled ?? false;
@@ -201,7 +256,7 @@ export default function BeamBucklingPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
       
-      {/* Top Navigation Bar */}
+      {/* Navigation Header */}
       <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -216,10 +271,10 @@ export default function BeamBucklingPage() {
                 <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-mono text-[10px] uppercase font-semibold">
                   Solid Mechanics
                 </span>
-                <span className="text-slate-500 text-xs font-mono">• Interactive Solver</span>
+                <span className="text-slate-500 text-xs font-mono">• Beam & Column Solver</span>
               </div>
               <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                Beam Buckling & Stress Visualizer
+                Beam Buckling, SFD & BMD Visualizer
               </h1>
             </div>
           </div>
@@ -244,10 +299,10 @@ export default function BeamBucklingPage() {
             <div>
               <h2 className="text-sm font-semibold text-slate-300 font-mono uppercase tracking-wider mb-1 flex items-center gap-2">
                 <Zap className="w-4 h-4 text-cyan-400" />
-                Euler Critical Buckling Formula
+                Euler Critical Buckling & Internal Statics
               </h2>
               <p className="text-slate-400 text-xs max-w-xl">
-                Determines the maximum axial force <strong>P<sub>cr</sub></strong> a column can support before undergoing lateral elastic buckling deflection.
+                Calculates the critical load <strong>P<sub>cr</sub></strong> and models continuous lateral deflection, <strong>Shear Force Diagrams (SFD)</strong>, and <strong>Bending Moment Diagrams (BMD)</strong> induced by lateral elastic instability.
               </p>
             </div>
             <div className="bg-slate-950/90 border border-slate-800 px-6 py-3 rounded-xl font-mono text-cyan-300 text-base shadow-inner">
@@ -259,7 +314,7 @@ export default function BeamBucklingPage() {
         {/* Workspace Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* Left Column: Input Control Deck (5 cols) */}
+          {/* Left Column: Parameter Configuration (5 cols) */}
           <div className="lg:col-span-5 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <h3 className="font-semibold text-white text-base flex items-center gap-2">
@@ -276,7 +331,7 @@ export default function BeamBucklingPage() {
 
             <div className="space-y-5 text-xs font-mono">
               
-              {/* Interactive Load Slider */}
+              {/* Load Slider */}
               <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800/80 space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-300 font-semibold flex items-center gap-1.5">
@@ -311,7 +366,7 @@ export default function BeamBucklingPage() {
                 </div>
               </div>
 
-              {/* End Support Conditions */}
+              {/* End Supports */}
               <div>
                 <label className="block text-slate-400 mb-1.5">End Support Condition (K Factor)</label>
                 <select 
@@ -375,7 +430,7 @@ export default function BeamBucklingPage() {
               {/* Length L */}
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
-                  <span>Column Unbraced Length (L)</span>
+                  <span>Column Span Length (L)</span>
                   <span className="text-cyan-400 font-bold">{inputs.L_m} meters</span>
                 </div>
                 <input 
@@ -394,94 +449,165 @@ export default function BeamBucklingPage() {
               onClick={runPythonSolver}
               className="w-full bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 font-semibold py-3 rounded-xl text-xs transition-colors flex items-center justify-center gap-2"
             >
-              <Zap className="w-3.5 h-3.5" /> Execute Server Calculation
+              <Zap className="w-3.5 h-3.5" /> Re-compute Python Engine
             </button>
           </div>
 
-          {/* Right Column: Dynamic Simulation Canvas & Metrics (7 cols) */}
+          {/* Right Column: Multi-Diagram Deck (Deflection, SFD, BMD) & Results (7 cols) */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* Interactive Animated SVG Beam Visualizer */}
+            {/* Interactive Diagram Control Header */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4 relative overflow-hidden">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
                 <h4 className="text-xs font-mono uppercase text-slate-300 font-semibold flex items-center gap-2">
                   <Gauge className="w-4 h-4 text-cyan-400" />
-                  Real-Time Mode Shape & Deflection Curve
+                  Structural Diagram Visualizer
                 </h4>
-                <span className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border ${
-                  inputs.P_kn === 0 
-                    ? 'border-slate-700 bg-slate-800 text-slate-400' 
-                    : isBuckled 
-                      ? 'border-rose-500/40 bg-rose-950/60 text-rose-400 animate-pulse' 
-                      : 'border-cyan-500/40 bg-cyan-950/60 text-cyan-400'
-                }`}>
-                  {inputs.P_kn === 0 ? 'State: Zero Load (Neutral)' : isBuckled ? 'State: BUCKLED' : 'State: Stable Deflection'}
-                </span>
+
+                {/* View Switcher Tabs */}
+                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
+                  <button
+                    onClick={() => setActiveTab('stacked')}
+                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                      activeTab === 'stacked' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" /> Stacked
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('deflection')}
+                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                      activeTab === 'deflection' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" /> Deflection
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('sfd')}
+                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                      activeTab === 'sfd' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <BarChart2 className="w-3.5 h-3.5" /> SFD
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('bmd')}
+                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                      activeTab === 'bmd' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" /> BMD
+                  </button>
+                </div>
               </div>
 
-              {/* Simulation Canvas Container */}
-              <div className="h-64 w-full bg-slate-950 rounded-xl border border-slate-800/90 p-6 relative flex flex-col justify-between overflow-hidden shadow-2xl">
+              {/* Diagram Displays */}
+              <div className="space-y-4">
                 
-                <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:2rem_2rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-20 pointer-events-none" />
+                {/* 1. Deflection Mode Shape Curve */}
+                {(activeTab === 'stacked' || activeTab === 'deflection') && (
+                  <div className="bg-slate-950 rounded-xl border border-slate-800/90 p-4 space-y-2 relative shadow-inner">
+                    <div className="flex justify-between items-center text-[11px] font-mono">
+                      <span className="text-cyan-400 font-semibold flex items-center gap-1">
+                        • Elastic Deflection Profile y(x)
+                      </span>
+                      <span className="text-slate-500">Max Deflection: Mid-Span</span>
+                    </div>
 
-                {/* Left Force Vector Arrow */}
-                <div className={`absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 z-20 transition-all duration-300 ${
-                  inputs.P_kn === 0 ? 'opacity-20 translate-x-[-8px]' : 'opacity-100 translate-x-0'
-                }`}>
-                  <div className="text-[10px] font-mono font-bold text-cyan-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800">
-                    P = {inputs.P_kn} kN
+                    <div className="h-24 w-full relative flex items-center justify-center">
+                      <svg className="w-full h-full overflow-visible" viewBox="0 0 500 80" preserveAspectRatio="none">
+                        <line x1="0" y1="40" x2="500" y2="40" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
+                        <path
+                          d={getDeflectionPath(80)}
+                          fill="none"
+                          stroke={inputs.P_kn === 0 ? "#64748b" : isBuckled ? "#f43f5e" : "#06b6d4"}
+                          strokeWidth={isBuckled ? "3.5" : "2.5"}
+                          className="transition-all duration-300 ease-out"
+                        />
+                      </svg>
+                      <div className="absolute left-0 w-2 h-8 bg-slate-800 border border-slate-700 rounded-sm" />
+                      <div className="absolute right-0 w-2 h-8 bg-slate-800 border border-slate-700 rounded-sm" />
+                    </div>
                   </div>
-                  <ArrowRight className={`w-6 h-6 transition-transform ${
-                    isBuckled ? 'text-rose-500 animate-bounce' : 'text-cyan-400'
-                  }`} />
-                </div>
+                )}
 
-                {/* Right Force Vector Arrow */}
-                <div className={`absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 z-20 transition-all duration-300 ${
-                  inputs.P_kn === 0 ? 'opacity-20 translate-x-[8px]' : 'opacity-100 translate-x-0'
-                }`}>
-                  <ArrowLeft className={`w-6 h-6 transition-transform ${
-                    isBuckled ? 'text-rose-500 animate-bounce' : 'text-cyan-400'
-                  }`} />
-                  <div className="text-[10px] font-mono font-bold text-cyan-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800">
-                    Reaction
+                {/* 2. Shear Force Diagram (SFD) */}
+                {(activeTab === 'stacked' || activeTab === 'sfd') && (
+                  <div className="bg-slate-950 rounded-xl border border-slate-800/90 p-4 space-y-2 relative shadow-inner">
+                    <div className="flex justify-between items-center text-[11px] font-mono">
+                      <span className="text-amber-400 font-semibold flex items-center gap-1">
+                        <BarChart2 className="w-3 h-3" /> Shear Force Diagram (SFD)
+                      </span>
+                      <span className="text-amber-300 font-bold">V<sub>max</sub> = {activeResult?.max_V_kn || 0} kN</span>
+                    </div>
+
+                    <div className="h-24 w-full relative flex items-center justify-center">
+                      <svg className="w-full h-full overflow-visible" viewBox="0 0 500 80" preserveAspectRatio="none">
+                        <line x1="0" y1="40" x2="500" y2="40" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
+                        <path
+                          d={getSFDPath(80).area}
+                          fill="url(#sfdGradient)"
+                          opacity="0.35"
+                        />
+                        <path
+                          d={getSFDPath(80).line}
+                          fill="none"
+                          stroke="#f59e0b"
+                          strokeWidth="2"
+                        />
+                        <defs>
+                          <linearGradient id="sfdGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.8" />
+                            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.0" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Central Beam SVG */}
-                <div className="my-auto relative w-full h-28 flex items-center justify-center">
-                  <svg className="w-full h-full overflow-visible" viewBox="0 0 500 100" preserveAspectRatio="none">
-                    <line x1="0" y1="50" x2="500" y2="50" stroke="#334155" strokeDasharray="6 6" strokeWidth="1.5" />
-                    <path
-                      d={getSvgPathString()}
-                      fill="none"
-                      stroke={inputs.P_kn === 0 ? "#64748b" : isBuckled ? "#f43f5e" : "#06b6d4"}
-                      strokeWidth={isBuckled ? "4" : "3"}
-                      className="transition-all duration-300 ease-out"
-                      style={{
-                        filter: isBuckled ? 'drop-shadow(0 0 10px rgba(244, 63, 94, 0.6))' : 'drop-shadow(0 0 8px rgba(6, 182, 212, 0.4))'
-                      }}
-                    />
-                    {inputs.P_kn > 0 && (
-                      <circle 
-                        cx="250" 
-                        cy={50 - (activeResult ? Math.min(Math.max((inputs.P_kn / parseFloat(activeResult.P_cr_kn)) * 28, 6), 42) : 15)} 
-                        r="5" 
-                        fill={isBuckled ? "#f43f5e" : "#06b6d4"}
-                        className="transition-all duration-300 ease-out animate-pulse"
-                      />
-                    )}
-                  </svg>
+                {/* 3. Bending Moment Diagram (BMD) */}
+                {(activeTab === 'stacked' || activeTab === 'bmd') && (
+                  <div className="bg-slate-950 rounded-xl border border-slate-800/90 p-4 space-y-2 relative shadow-inner">
+                    <div className="flex justify-between items-center text-[11px] font-mono">
+                      <span className="text-purple-400 font-semibold flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3" /> Bending Moment Diagram (BMD)
+                      </span>
+                      <span className="text-purple-300 font-bold">M<sub>max</sub> = {activeResult?.max_M_kNm || 0} kN·m</span>
+                    </div>
 
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-12 bg-slate-800 border border-slate-700 rounded-sm shadow-md" />
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-12 bg-slate-800 border border-slate-700 rounded-sm shadow-md" />
-                </div>
+                    <div className="h-24 w-full relative flex items-center justify-center">
+                      <svg className="w-full h-full overflow-visible" viewBox="0 0 500 80" preserveAspectRatio="none">
+                        <line x1="0" y1="40" x2="500" y2="40" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
+                        <path
+                          d={getBMDPath(80).area}
+                          fill="url(#bmdGradient)"
+                          opacity="0.35"
+                        />
+                        <path
+                          d={getBMDPath(80).line}
+                          fill="none"
+                          stroke="#a855f7"
+                          strokeWidth="2"
+                        />
+                        <defs>
+                          <linearGradient id="bmdGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#a855f7" stopOpacity="0.8" />
+                            <stop offset="100%" stopColor="#a855f7" stopOpacity="0.0" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                    </div>
+                  </div>
+                )}
 
-                <div className="flex justify-between text-[10px] font-mono text-slate-500 pt-2 border-t border-slate-900">
+                {/* X-Axis Span Legend */}
+                <div className="flex justify-between text-[10px] font-mono text-slate-500 px-2 pt-1">
                   <span>x = 0 (Base Support)</span>
-                  <span className="text-slate-400">x = {(inputs.L_m / 2).toFixed(2)}m (Mid-span Deflection)</span>
+                  <span>x = {(inputs.L_m / 2).toFixed(2)}m (Mid-span)</span>
                   <span>x = {inputs.L_m}m (Top Support)</span>
                 </div>
+
               </div>
             </div>
 
@@ -493,10 +619,10 @@ export default function BeamBucklingPage() {
               </div>
             )}
 
-            {/* Results Display Area */}
+            {/* Computed Results Section */}
             {activeResult && (
               <>
-                {/* Buckling Status Indicator Banner */}
+                {/* Buckling Safety Banner */}
                 <div className={`p-6 rounded-2xl border transition-all duration-500 ${
                   isBuckled 
                     ? 'bg-rose-950/30 border-rose-500/50 text-rose-300 shadow-xl shadow-rose-950/20' 
@@ -504,7 +630,7 @@ export default function BeamBucklingPage() {
                 } flex items-center justify-between`}>
                   <div className="space-y-1">
                     <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                      Buckling Safety Analysis
+                      Buckling Safety & Stability Status
                     </span>
                     <h3 className="text-2xl font-bold flex items-center gap-2">
                       {isBuckled ? (
@@ -515,7 +641,7 @@ export default function BeamBucklingPage() {
                       ) : (
                         <>
                           <ShieldCheck className="w-6 h-6 text-emerald-400" /> 
-                          <span className="text-emerald-400">STRUCTURALLY STABLE</span>
+                          <span className="text-emerald-400 font-bold">STRUCTURALLY STABLE</span>
                         </>
                       )}
                     </h3>
@@ -529,31 +655,23 @@ export default function BeamBucklingPage() {
                   </div>
                 </div>
 
-                {/* Key Metrics Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 font-mono">
+                {/* Engineering Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono">
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
                     <div className="text-xs text-slate-500 mb-1">Critical Load (P<sub>cr</sub>)</div>
-                    <div className="text-xl font-bold text-cyan-400">{activeResult.P_cr_kn} kN</div>
+                    <div className="text-lg font-bold text-cyan-400">{activeResult.P_cr_kn} kN</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Critical Stress (&sigma;<sub>cr</sub>)</div>
-                    <div className="text-xl font-bold text-slate-200">{activeResult.sigma_cr_mpa} MPa</div>
+                    <div className="text-xs text-slate-500 mb-1">Max Moment (M<sub>max</sub>)</div>
+                    <div className="text-lg font-bold text-purple-400">{activeResult.max_M_kNm} kN·m</div>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+                    <div className="text-xs text-slate-500 mb-1">Max Shear (V<sub>max</sub>)</div>
+                    <div className="text-lg font-bold text-amber-400">{activeResult.max_V_kn} kN</div>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
                     <div className="text-xs text-slate-500 mb-1">Slenderness (&lambda;)</div>
-                    <div className="text-xl font-bold text-slate-200">{activeResult.slenderness}</div>
-                  </div>
-                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Effective Length (L<sub>e</sub>)</div>
-                    <div className="text-xl font-bold text-slate-200">{activeResult.effective_length_m} m</div>
-                  </div>
-                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">Radius of Gyration (r)</div>
-                    <div className="text-xl font-bold text-slate-200">{activeResult.radius_of_gyration_mm} mm</div>
-                  </div>
-                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-                    <div className="text-xs text-slate-500 mb-1">K-Factor</div>
-                    <div className="text-xl font-bold text-slate-200">{activeResult.K_factor}</div>
+                    <div className="text-lg font-bold text-slate-200">{activeResult.slenderness}</div>
                   </div>
                 </div>
 
@@ -566,7 +684,7 @@ export default function BeamBucklingPage() {
                       </div>
                       <div>
                         <h4 className="text-sm font-bold text-white">Gemini Structural Advisor</h4>
-                        <p className="text-[10px] text-slate-400 font-mono">AI Failure Analysis & Design Recommendations</p>
+                        <p className="text-[10px] text-slate-400 font-mono">AI Shear, Moment & Buckling Analysis</p>
                       </div>
                     </div>
 
