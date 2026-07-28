@@ -279,14 +279,6 @@ export default function BeamBucklingPage() {
             </div>
           </div>
 
-          <button 
-            onClick={runPythonSolver}
-            disabled={loading}
-            className="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs shadow-lg shadow-cyan-500/25 transition-all hover:scale-[1.03] active:scale-95 disabled:opacity-50"
-          >
-            {loading ? <Activity className="w-4 h-4 animate-spin text-slate-950" /> : <Play className="w-4 h-4 fill-slate-950" />}
-            {loading ? 'Computing...' : 'Run Server Solver'}
-          </button>
         </div>
       </header>
 
