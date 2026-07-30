@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation'; // Assuming Next.js App Router
 import { 
   Gauge, 
@@ -23,6 +23,7 @@ import {
   PlusCircle,
   ExternalLink
 } from 'lucide-react';
+import ToolInstructions from '@/app/components/ToolInstructions';
 
 export default function BeamBucklingPage() {
   const router = useRouter();
@@ -391,7 +392,25 @@ export default function BeamBucklingPage() {
               Live Deflection, SFD, and BMD diagrams on a single unified dashboard.
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => {
+              const payload = { inputs, presets: { selectedMaterial, selectedShape }, results: activeResult };
+              const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a'); a.href = url; a.download = 'beam-buckling-results.json'; a.click(); URL.revokeObjectURL(url);
+            }} className="text-xs px-3 py-1 rounded-md bg-slate-800/60 hover:bg-slate-800/80 border border-slate-700 text-slate-200">Export Results</button>
+          </div>
         </header>
+        <ToolInstructions
+          title="Beam Buckling"
+          subtitle="Select a load regime, pick material and cross-section presets, then enter geometry and loads. Results update instantly."
+          quick="1. Select regime · 2. Set geometry · 3. Inspect diagrams"
+          steps={[
+            'Start with preset material and shape or add custom library items.',
+            'Adjust length, eccentricity and load magnitudes for realistic scenarios.',
+            'Switch tabs to check fatigue or impact behavior; use Goodman utilization for fatigue.'
+          ]}
+        />
 
         {/* Load Regime Mode Selection Tabs */}
         <div className="grid grid-cols-3 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 font-mono text-xs">

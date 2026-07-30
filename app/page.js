@@ -62,11 +62,11 @@ export default function Dashboard() {
       id: 'heat-conduction',
       title: 'Heat Transfer Conduction',
       category: 'Thermodynamics',
-      description: 'Calculate steady-state and transient heat transfer rates through composite multi-layer walls, fins, and hollow cylinders.',
+      description: 'Calculate steady-state heat transfer through composite multi-layer walls and evaluate conductive and convective resistances.',
       formula: 'q = -k A (dT/dx)',
-      status: 'Draft Spec',
-      isReady: false,
-      href: '#',
+      status: 'JS Solver Ready',
+      isReady: true,
+      href: '/tools/heat-transfer',
       icon: Flame,
       accentGradient: 'from-orange-500/20 via-amber-500/10 to-transparent',
       badgeColor: 'text-amber-400 border-amber-500/30 bg-amber-950/50',
@@ -273,6 +273,7 @@ function Navbar() {
           <Link href="/" className="px-4 py-1.5 text-xs font-semibold text-cyan-400 bg-slate-800 rounded-lg shadow-sm">Dashboard</Link>
           <Link href="/tools/centrifugal-pump" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Pump Analysis</Link>
           <Link href="/tools/beam-buckling" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Beam Buckling</Link>
+          <Link href="/tools/heat-transfer" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Heat Transfer</Link>
           <a href="#" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">API Docs</a>
         </nav>
 

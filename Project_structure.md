@@ -26,12 +26,17 @@
       - `route.js`
     - `buckling/`
       - `route.js`
+    - `centrifugl-pump/`
+      - `route.js`
   - `tools/`
     - `beam-buckling/`
+      - `page.jsx`
+    - `centrifugal-pump/`
       - `page.jsx`
 
 - `lib/`
   - `buckling.js`
+  - `centrifugal-pump.js`
 
 - `public/`
   - `favicon.ico`

@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import ToolInstructions from '@/app/components/ToolInstructions';
 import { analyzePump, FLUID_PRESETS } from "@/lib/centrifugal-pump";
+import { Bot } from 'lucide-react';
 
 export default function CentrifugalPumpStudio() {
   // Mode & Tabs State
@@ -101,6 +103,43 @@ export default function CentrifugalPumpStudio() {
     return insights;
   }, [results, suctionHead, suctionDiameter]);
 
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const generateFallbackAiAnalysisPump = (errorMessage) => {
+    return (
+      `**GEMINI HYDRAULIC DIAGNOSTIC & ADVISORY**\n\n` +
+      `• **Operating Point:** Q=${flowRate} m³/h @ N=${rpm} RPM | TDH=${results.heads.tdh} m\n` +
+      `• **NPSH:** Available=${results.npsh.npsha} m | Required=${results.npsh.npshr} m | Margin=${results.npsh.margin} m\n\n` +
+      `• **Immediate Recommendations:**\n  - ${results.npsh.safe ? 'Operating NPSH margin is acceptable.' : 'Increase suction diameter or reduce suction lift to reduce cavitation risk.'}\n  - ${results.velocities.Vs > 2.5 ? 'Reduce suction velocity to lower friction losses.' : 'Suction velocity within recommended range.'}` +
+      (errorMessage ? `\n\n*Fallback insight generated because AI route failed: ${errorMessage}*` : '')
+    );
+  };
+
+  const fetchAiAnalysisPump = async () => {
+    setAiLoading(true); setAiAnalysis('');
+    try {
+      const response = await fetch('/api/ai-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inputs: {
+            flowRate, rpm, suctionHead, deliveryHead, suctionLength, deliveryLength,
+            suctionDiameter, deliveryDiameter, impellerDiameter, impellerWidth, bladeAngle, npshr, fluidKey
+          },
+          result: { heads: results.heads, npsh: results.npsh, efficiencies: results.efficiencies },
+          tool: 'centrifugal-pump'
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || `AI returned ${response.status}`);
+      setAiAnalysis(data.analysis || generateFallbackAiAnalysisPump('AI returned no analysis'));
+    } catch (err) {
+      console.warn('[AI pump] fallback', err?.message || err);
+      setAiAnalysis(generateFallbackAiAnalysisPump(err?.message || 'Unknown'));
+    } finally { setAiLoading(false); }
+  };
+
   return (
     <div className="min-h-screen bg-[#0B0F17] text-slate-100 p-4 md:p-8 font-sans">
       {/* Header */}
@@ -115,6 +154,15 @@ export default function CentrifugalPumpStudio() {
           <p className="text-sm text-slate-400 mt-1">
             Real-time Total Dynamic Head (TDH), NPSH Cavitation Analysis, System Head Curves & Hydraulics Analysis.
           </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button onClick={() => {
+            const payload = { inputs: { flowRate, rpm, suctionHead, deliveryHead, suctionLength, deliveryLength, suctionDiameter, deliveryDiameter, impellerDiameter, impellerWidth, bladeAngle, npshr }, fluidKey, results };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'centrifugal-pump-results.json'; a.click(); URL.revokeObjectURL(url);
+          }} className="text-xs px-3 py-1 rounded-md bg-slate-800/60 hover:bg-slate-800/80 border border-slate-700 text-slate-200">Export Results</button>
         </div>
 
         {/* Global Regime / Tab Switcher */}
@@ -151,6 +199,17 @@ export default function CentrifugalPumpStudio() {
           </button>
         </div>
       </header>
+
+      <ToolInstructions
+        title="Centrifugal Pump"
+        subtitle="Use the tabs to switch between operating parameters, geometry, and fluid properties. Adjust flow, speed and piping dimensions to see TDH, NPSH margin and efficiency update live."
+        quick="1. Set operating point · 2. Tune geometry · 3. Check NPSH"
+        steps={[
+          'Start with an expected flow and RPM for your system.',
+          'Check NPSH availability — increase suction diameter or reduce lift if margin is low.',
+          'Optimize impeller geometry and speed to improve efficiency and reduce shaft power.'
+        ]}
+      />
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -660,6 +719,24 @@ export default function CentrifugalPumpStudio() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Gemini Advisor */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 backdrop-blur-md mt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Bot className="text-cyan-300" />
+                <h4 className="text-sm font-bold text-white">Gemini Hydraulic Advisor</h4>
+              </div>
+              <div>
+                <button onClick={fetchAiAnalysisPump} disabled={aiLoading} className="text-xs px-3 py-1 rounded-md bg-slate-800/60 hover:bg-slate-800/80 border border-slate-700 text-slate-200">
+                  {aiLoading ? 'Analyzing...' : 'Evaluate System'}
+                </button>
+              </div>
+            </div>
+            {aiAnalysis && (
+              <div className="mt-3 text-slate-300 text-sm whitespace-pre-wrap">{aiAnalysis}</div>
+            )}
           </div>
 
         </div>
