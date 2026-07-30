@@ -293,46 +293,86 @@ export default function BeamBucklingPage() {
     return { line, area };
   };
 
+  const generateFallbackAiAnalysis = (errorMessage) => {
+    let modeDetails = "";
+    let recs = "";
+
+    if (loadTab === 'static') {
+      modeDetails = `Static Load P = ${inputs.P_static_kn} kN | Critical Buckling Threshold = ${activeResult.P_cr_kn} kN (Static FoS: ${activeResult.static_fos}). ` +
+                    `Maximum Bending Moment M_max = ${activeResult.max_M_static_kNm} kN·m | Shear V_max = ${activeResult.max_V_static_kn} kN.`;
+      recs = parseFloat(activeResult.static_fos) < 1.0
+        ? "CRITICAL STATIC FAILURE: Exceeds buckling load limit. Recommend choosing a stiffer profile from /myshapes or increasing inertia I."
+        : "SAFE STATIC STATE: Operating within elastic stability limits.";
+    } else if (loadTab === 'fatigue') {
+      modeDetails = `Fatigue Mean Stress = ${activeResult.sigma_mean_mpa} MPa | Alternating Stress = ${activeResult.sigma_alt_mpa} MPa. ` +
+                    `Goodman Utilization = ${activeResult.goodman_utilization} / 1.0 (Fatigue FoS: ${activeResult.fatigue_fos}).`;
+      recs = parseFloat(activeResult.goodman_utilization) >= 1.0
+        ? "CRITICAL FATIGUE FAILURE: High cyclic amplitude risks fatigue failure. Select a material with higher Endurance Limit Se from /mymaterials."
+        : "SAFE FATIGUE STATE: Within the infinite fatigue life Goodman boundary.";
+    } else {
+      modeDetails = `Impact Mass = ${inputs.drop_mass_kg} kg dropped from ${inputs.drop_h_mm} mm height. ` +
+                    `DAF = ${activeResult.daf}x spiking force to ${activeResult.P_impact_kn} kN (Impact FoS: ${activeResult.impact_fos}).`;
+      recs = parseFloat(activeResult.impact_fos) < 1.0
+        ? "CRITICAL DYNAMIC FAILURE: Dynamic shock causes instantaneous buckling. Recommend dynamic dampening or section reinforcement."
+        : "SAFE DYNAMIC STATE: Transient impact load remains within elastic limits.";
+    }
+
+    return (
+      `**GEMINI STRUCTURAL DIAGNOSTIC & REGIME ADVISORY**\n\n` +
+      `• **Member Profile:** ${activeMaterial.name} | ${activeShape.name}\n` +
+      `• **Column Classification:** ${activeResult.columnRegime} (Slenderness λ = ${activeResult.slenderness} vs Critical Boundary λ_c = ${activeResult.slenderness_critical})\n\n` +
+      `• **Active ${loadTab.toUpperCase()} Mode Diagnostics:**\n  ${modeDetails}\n\n` +
+      `• **Engineering Recommendations:**\n  ${recs}` +
+      (errorMessage ? `\n\n*Fallback insight generated because AI route failed: ${errorMessage}*` : '')
+    );
+  };
+
   // AI Analysis Handler
   const fetchAiAnalysis = async () => {
     setAiLoading(true);
     setAiAnalysis('');
+    setError('');
 
     try {
-      setTimeout(() => {
-        let modeDetails = "";
-        let recs = "";
+      const response = await fetch('/api/ai-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          inputs: {
+            P_kn: loadTab === 'static' ? inputs.P_static_kn : loadTab === 'fatigue' ? inputs.P_mean_kn + inputs.P_alt_kn : undefined,
+            P_static_kn: inputs.P_static_kn,
+            P_mean_kn: inputs.P_mean_kn,
+            P_alt_kn: inputs.P_alt_kn,
+            drop_mass_kg: inputs.drop_mass_kg,
+            drop_h_mm: inputs.drop_h_mm,
+            L_m: inputs.L_m,
+            E_gpa: activeMaterial.E_gpa,
+            I_cm4: activeShape.I_cm4,
+            A_cm2: activeShape.A_cm2,
+            condition: inputs.condition,
+            loadTab,
+          },
+          result: {
+            P_cr_kn: activeResult.P_cr_kn,
+            safety_factor: loadTab === 'static' ? activeResult.static_fos : loadTab === 'fatigue' ? activeResult.fatigue_fos : activeResult.impact_fos,
+            slenderness: activeResult.slenderness,
+            isBuckled: isFailed,
+          }
+        })
+      });
 
-        if (loadTab === 'static') {
-          modeDetails = `Static Load P = ${inputs.P_static_kn} kN | Critical Buckling Threshold = ${activeResult.P_cr_kn} kN (Static FoS: ${activeResult.static_fos}). ` +
-                        `Maximum Bending Moment M_max = ${activeResult.max_M_static_kNm} kN·m | Shear V_max = ${activeResult.max_V_static_kn} kN.`;
-          recs = parseFloat(activeResult.static_fos) < 1.0 
-            ? "CRITICAL STATIC FAILURE: Exceeds buckling load limit. Recommend choosing a stiffer profile from /myshapes or increasing inertia I."
-            : "SAFE STATIC STATE: Operating within elastic stability limits.";
-        } else if (loadTab === 'fatigue') {
-          modeDetails = `Fatigue Mean Stress = ${activeResult.sigma_mean_mpa} MPa | Alternating Stress = ${activeResult.sigma_alt_mpa} MPa. ` +
-                        `Goodman Utilization = ${activeResult.goodman_utilization} / 1.0 (Fatigue FoS: ${activeResult.fatigue_fos}).`;
-          recs = parseFloat(activeResult.goodman_utilization) >= 1.0
-            ? "CRITICAL FATIGUE FAILURE: High cyclic amplitude risks fatigue failure. Select a material with higher Endurance Limit Se from /mymaterials."
-            : "SAFE FATIGUE STATE: Within the infinite fatigue life Goodman boundary.";
-        } else {
-          modeDetails = `Impact Mass = ${inputs.drop_mass_kg} kg dropped from ${inputs.drop_h_mm} mm height. ` +
-                        `DAF = ${activeResult.daf}x spiking force to ${activeResult.P_impact_kn} kN (Impact FoS: ${activeResult.impact_fos}).`;
-          recs = parseFloat(activeResult.impact_fos) < 1.0
-            ? "CRITICAL DYNAMIC FAILURE: Dynamic dynamic shock causes instantaneous buckling. Recommend dynamic dampening or section reinforcement."
-            : "SAFE DYNAMIC STATE: Transient impact load remains within elastic limits.";
-        }
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data.error || `AI service returned status ${response.status}`);
+      }
 
-        setAiAnalysis(
-          `**GEMINI STRUCTURAL DIAGNOSTIC & REGIME ADVISORY**\n\n` +
-          `• **Member Profile:** ${activeMaterial.name} | ${activeShape.name}\n` +
-          `• **Column Classification:** ${activeResult.columnRegime} (Slenderness λ = ${activeResult.slenderness} vs Critical Boundary λ_c = ${activeResult.slenderness_critical})\n\n` +
-          `• **Active ${loadTab.toUpperCase()} Mode Diagnostics:**\n  ${modeDetails}\n\n` +
-          `• **Engineering Recommendations:**\n  ${recs}`
-        );
-        setAiLoading(false);
-      }, 600);
+      setAiAnalysis(data.analysis || generateFallbackAiAnalysis('AI service returned no analysis text.'));
     } catch (err) {
+      console.warn('[AI Insights] fallback engaged:', err?.message || err);
+      setAiAnalysis(generateFallbackAiAnalysis(err?.message || 'Unknown error'));
+    } finally {
       setAiLoading(false);
     }
   };
@@ -348,7 +388,7 @@ export default function BeamBucklingPage() {
               <Layers className="w-6 h-6" /> Structural Buckling, Fatigue & Impact Studio
             </h1>
             <p className="text-slate-400 text-xs mt-1">
-              Live Deflection, SFD, BMD, and Goodman Fatigue diagrams on a single unified dashboard.
+              Live Deflection, SFD, and BMD diagrams on a single unified dashboard.
             </p>
           </div>
         </header>
@@ -508,6 +548,9 @@ export default function BeamBucklingPage() {
                 <h3 className="text-xs font-mono uppercase tracking-wider text-cyan-400 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
                   <Gauge className="w-4 h-4 text-cyan-400" /> Static Loading Parameters
                 </h3>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  Use the static mode to assess a constant axial load with eccentricity. This panel shows how the member responds under elastic buckling and combined bending stress, and it calculates the static safety factor for the selected material and section.
+                </p>
 
                 <div className="space-y-4 text-xs font-mono">
                   <div>
@@ -550,6 +593,9 @@ export default function BeamBucklingPage() {
                 <h3 className="text-xs font-mono uppercase tracking-wider text-purple-400 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
                   <Repeat className="w-4 h-4 text-purple-400" /> Goodman Fatigue Parameters
                 </h3>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  The fatigue tab evaluates cyclic mean and alternating loads using a Modified Goodman approach. Enter the mean load, alternating amplitude, and stress concentration factor to estimate fatigue utilization and determine whether the section is safe under repeated loading.
+                </p>
 
                 <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                   <div>
@@ -595,6 +641,9 @@ export default function BeamBucklingPage() {
                 <h3 className="text-xs font-mono uppercase tracking-wider text-amber-400 font-semibold flex items-center gap-2 border-b border-slate-800 pb-3">
                   <Zap className="w-4 h-4 text-amber-400" /> Dynamic Impact Parameters
                 </h3>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  Impact mode models a dropped mass striking the column and computes the dynamic amplification factor. Use this tab to estimate the peak impact load and check whether the section can withstand transient shock loading without buckling.
+                </p>
 
                 <div className="space-y-3 text-xs font-mono">
                   <div>
@@ -711,14 +760,14 @@ export default function BeamBucklingPage() {
 
                 {/* 3. Bending Moment Diagram (BMD) */}
                 <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 shadow-inner space-y-1">
-                  <div className="flex justify-between text-[11px] font-mono text-purple-400">
-                    <span className="flex items-center gap-1.5 font-bold">
+                  <div className="flex flex-wrap justify-between gap-2 text-[11px] font-mono text-purple-400">
+                    <span className="flex items-center gap-1.5 font-bold min-w-0">
                       <TrendingUp className="w-3.5 h-3.5" /> 3. Bending Moment Diagram (BMD)
                     </span>
-                    <span>M<sub>max</sub> = {activeMomentsAndShears.M_max} kN·m</span>
+                    <span className="min-w-max">M<sub>max</sub> = {activeMomentsAndShears.M_max} kN·m</span>
                   </div>
                   <div className="h-24 w-full relative flex items-center justify-center">
-                    <svg className="w-full h-full" viewBox="0 0 500 60" preserveAspectRatio="none">
+                    <svg className="w-full h-full" viewBox="0 0 520 60" preserveAspectRatio="none">
                       <line x1="0" y1="30" x2="500" y2="30" stroke="#334155" strokeDasharray="4 4" strokeWidth="1" />
                       <path d={getBMDPath(60).area} fill="#a855f7" opacity="0.25" />
                       <path d={getBMDPath(60).line} fill="none" stroke="#a855f7" strokeWidth="2" />
@@ -727,7 +776,7 @@ export default function BeamBucklingPage() {
                 </div>
 
                 {/* 4. Goodman Fatigue Plot */}
-                {activeResult && (
+                {activeResult && loadTab === 'fatigue' && (
                   <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 shadow-inner space-y-1 font-mono">
                     <div className="flex justify-between text-[11px] text-purple-300">
                       <span className="flex items-center gap-1.5 font-bold">

@@ -48,14 +48,14 @@ export default function Dashboard() {
       id: 'centrifugal-pump',
       title: 'Centrifugal Pump Analysis',
       category: 'Fluid Machinery',
-      description: 'Generate pump performance curves, NPSH requirements, velocity triangles, and hydraulic efficiency calculations.',
-      formula: 'H = (v₂² - v₁²) / 2g',
-      status: 'Draft Spec',
-      isReady: false,
-      href: '#',
+      description: 'Generate pump performance curves, NPSH cavitation margins, pipe friction head losses, and dynamic efficiency points.',
+      formula: 'TDH = H_s + H_d + h_f',
+      status: 'JS Solver Ready',
+      isReady: true,
+      href: '/tools/centrifugal-pump',
       icon: Droplets,
       accentGradient: 'from-teal-500/20 via-emerald-500/10 to-transparent',
-      badgeColor: 'text-amber-400 border-amber-500/30 bg-amber-950/50',
+      badgeColor: 'text-teal-400 border-teal-500/30 bg-teal-950/50',
       iconBg: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
     },
     {
@@ -138,14 +138,17 @@ export default function Dashboard() {
 
             <div className="flex flex-wrap sm:flex-nowrap gap-3 w-full md:w-auto">
               <Link 
+                href="/tools/centrifugal-pump"
+                className="flex-1 md:flex-none inline-flex items-center justify-center gap-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-teal-500/20 transition-all hover:scale-[1.02] active:scale-95 text-sm"
+              >
+                <Droplets className="w-4 h-4" /> Pump Studio
+              </Link>
+              <Link 
                 href="/tools/beam-buckling"
                 className="flex-1 md:flex-none inline-flex items-center justify-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] active:scale-95 text-sm"
               >
                 <Zap className="w-4 h-4" /> Quick Solvers
               </Link>
-              <button className="flex-1 md:flex-none inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-medium px-5 py-2.5 rounded-xl transition-all text-sm">
-                <Database className="w-4 h-4 text-emerald-400" /> Load Specs
-              </button>
             </div>
           </div>
 
@@ -268,8 +271,8 @@ function Navbar() {
         {/* Navigation Links */}
         <nav className="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800/80">
           <Link href="/" className="px-4 py-1.5 text-xs font-semibold text-cyan-400 bg-slate-800 rounded-lg shadow-sm">Dashboard</Link>
-          <Link href="/tools/beam-buckling" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Solvers</Link>
-          <a href="#" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Saved Configs</a>
+          <Link href="/tools/centrifugal-pump" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Pump Analysis</Link>
+          <Link href="/tools/beam-buckling" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">Beam Buckling</Link>
           <a href="#" className="px-4 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-lg transition-all">API Docs</a>
         </nav>
 
