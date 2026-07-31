@@ -414,6 +414,18 @@ export default function HeatTransferPage() {
               )}
             </div>
           </div>
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 mt-6">
+            <h3 className="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-3">Key Terms for Heat Transfer</h3>
+            <div className="grid gap-3 text-xs text-slate-300">
+              <div><strong>Heat Flux</strong>: Heat transfer rate per unit area (W/m²).</div>
+              <div><strong>Overall U-value</strong>: Total thermal conductance of the composite wall (W/m²K).</div>
+              <div><strong>Thermal Resistance (R)</strong>: Temperature drop across a layer divided by heat flux.</div>
+              <div><strong>Convective Coefficient (h)</strong>: Heat transfer coefficient at a surface between fluid and solid.</div>
+              <div><strong>Thermal Conductivity (k)</strong>: Material property that governs conduction rate through a layer.</div>
+              <div><strong>Dominant Thermal Resistance</strong>: Layer that contributes most to the total resistance and controls heat flow.</div>
+            </div>
+          </div>
           
         </div>
       </div>

@@ -739,6 +739,18 @@ export default function CentrifugalPumpStudio() {
             )}
           </div>
 
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 mt-6">
+            <h3 className="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-3">Key Terms for Centrifugal Pump Analysis</h3>
+            <div className="grid gap-3 text-xs text-slate-300">
+              <div><strong>Flow Rate (Q)</strong>: Volume of fluid moved per time (m³/h).</div>
+              <div><strong>Total Dynamic Head (TDH)</strong>: Total energy head the pump must overcome, including elevation and friction losses.</div>
+              <div><strong>NPSH Available (NPSHa)</strong>: Suction-side head available to prevent vapor bubble formation and cavitation.</div>
+              <div><strong>NPSH Required (NPSHr)</strong>: Minimum head required by the pump to avoid cavitation at the specified operating point.</div>
+              <div><strong>Efficiency</strong>: Ratio of useful hydraulic power to shaft power input.</div>
+              <div><strong>Duty Point</strong>: Operating point where the pump curve intersects the system curve.</div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

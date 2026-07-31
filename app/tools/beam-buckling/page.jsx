@@ -900,6 +900,20 @@ export default function BeamBucklingPage() {
                     </div>
                   )}
                 </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 mt-6">
+                  <h3 className="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-3">
+                    Key Terms for Beam Buckling
+                  </h3>
+                  <div className="grid gap-3 text-xs text-slate-300">
+                    <div><strong>P_cr</strong>: Governing critical buckling load for the selected column and end conditions.</div>
+                    <div><strong>Slenderness Ratio (λ)</strong>: Effective length divided by radius of gyration; higher values favor Euler buckling.</div>
+                    <div><strong>Effective Length Factor (K)</strong>: Multiplier based on boundary conditions (pinned, fixed, free) that changes buckling length.</div>
+                    <div><strong>Factor of Safety (FOS)</strong>: Ratio of buckling capacity to applied axial load; values above 1.0 are safer.</div>
+                    <div><strong>Goodman Utilization</strong>: Fatigue demand ratio combining mean and alternating stress against material strength.</div>
+                    <div><strong>Eccentricity (e)</strong>: Offset of the load from the centroidal axis, creating bending in addition to axial stress.</div>
+                  </div>
+                </div>
               </>
             )}
 

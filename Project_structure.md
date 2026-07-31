@@ -28,15 +28,22 @@
       - `route.js`
     - `centrifugl-pump/`
       - `route.js`
+    - `heat-transfer/`
+      - `route.js`
+  - `components/`
+    - `ToolInstructions.jsx`
   - `tools/`
     - `beam-buckling/`
       - `page.jsx`
     - `centrifugal-pump/`
       - `page.jsx`
+    - `heat-transfer/`
+      - `page.jsx`
 
 - `lib/`
   - `buckling.js`
   - `centrifugal-pump.js`
+  - `heat-transfer.js`
 
 - `public/`
   - `favicon.ico`
