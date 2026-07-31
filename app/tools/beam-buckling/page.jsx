@@ -36,7 +36,9 @@ const BeamShaderMaterial = {
     uE: { value: 200e9 },
     uMaxStress: { value: 1e6 },
     uYield: { value: 250e6 },
-    uScaleFactor: { value: 0.35 },
+    uCriticalLoad: { value: 100000.0 },
+    uScaleFactor: { value: 1.0 },
+    uVisualScale: { value: 0.1 },
   },
   vertexShader: `
     uniform float uLoad;
@@ -47,6 +49,7 @@ const BeamShaderMaterial = {
     uniform float uMaxStress;
     uniform float uCriticalLoad;
     uniform float uScaleFactor;
+    uniform float uVisualScale;
 
     varying float vStressRatio;
     varying float vXPos;
@@ -64,7 +67,7 @@ const BeamShaderMaterial = {
         deflection = (uLoad * x * x * (3.0 * uLength - x)) / (6.0 * uE * I);
       }
 
-      pos.x += deflection * uScaleFactor;
+      pos.x += deflection * uScaleFactor * uVisualScale;
       float c = max(uWidth, uHeight) * 0.5;
       float bendingMoment = uLoad * x;
       float localStress = (bendingMoment * c) / max(I, 0.00001);
@@ -101,7 +104,7 @@ const BeamShaderMaterial = {
   `,
 };
 
-function BeamScene({ loadP, lengthL, widthB, heightH, youngE, yieldStrength, maxStress, criticalLoad }) {
+function BeamScene({ loadP, lengthL, widthB, heightH, youngE, yieldStrength, maxStress, criticalLoad, visualScale }) {
   const meshRef = useRef();
   const materialRef = useRef();
 
@@ -119,9 +122,10 @@ function BeamScene({ loadP, lengthL, widthB, heightH, youngE, yieldStrength, max
       uE: { value: youngE },
       uMaxStress: { value: maxStress },
       uCriticalLoad: { value: criticalLoad },
-      uScaleFactor: { value: 0.35 },
+      uScaleFactor: { value: 1.0 },
+      uVisualScale: { value: visualScale },
     }),
-    [loadP, lengthL, widthB, heightH, youngE, maxStress, criticalLoad]
+    [loadP, lengthL, widthB, heightH, youngE, maxStress, criticalLoad, visualScale]
   );
 
   const shaderOptions = useMemo(
@@ -435,6 +439,10 @@ export default function BeamBucklingPage() {
         : parseFloat(activeResult.impact_combined_stress_mpa) || 0
       : 1;
 
+    const criticalLoad = parseFloat(activeResult?.P_cr_kn || 0) * 1000;
+    const loadRatio = criticalLoad > 0 ? Math.min((currentLoadKn * 1000) / criticalLoad, 2.0) : 0;
+    const visualScale = loadRatio <= 1.0 ? 0.08 + loadRatio * 0.18 : 0.35 + (loadRatio - 1.0) * 1.3;
+
     return {
       loadP: currentLoadKn * 1000,
       lengthL: inputs.L_m,
@@ -443,7 +451,8 @@ export default function BeamBucklingPage() {
       youngE: activeMaterial.E_gpa * 1e9,
       yieldStrength: activeMaterial.S_y * 1e6,
       maxStress: Math.max(stressMpa * 1e6, 1e5),
-      criticalLoad: parseFloat(activeResult?.P_cr_kn || 0) * 1000,
+      criticalLoad,
+      visualScale,
     };
   }, [loadTab, inputs, activeMaterial, activeShape, activeResult]);
 

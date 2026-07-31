@@ -9,38 +9,83 @@ import ToolInstructions from '@/app/components/ToolInstructions';
 
 export default function HeatTransferPage() {
   // State for Boundary Conditions
-  const [boundaries, setBoundaries] = useState({
-    tInner: 200, // °C
-    hInner: 25,  // W/m2K
-    tOuter: -10, // °C
-    hOuter: 15   // W/m2K
+  const [boundaries, setBoundaries] = useState(() => {
+    const defaultBoundaries = {
+      tInner: '200',
+      hInner: '25',
+      tOuter: '-10',
+      hOuter: '15'
+    };
+
+    if (typeof window === 'undefined') {
+      return defaultBoundaries;
+    }
+
+    try {
+      const saved = localStorage.getItem('heat-transfer:boundaries');
+      if (!saved) return defaultBoundaries;
+      const parsed = JSON.parse(saved);
+      return {
+        tInner: String(parsed.tInner ?? defaultBoundaries.tInner),
+        hInner: String(parsed.hInner ?? defaultBoundaries.hInner),
+        tOuter: String(parsed.tOuter ?? defaultBoundaries.tOuter),
+        hOuter: String(parsed.hOuter ?? defaultBoundaries.hOuter)
+      };
+    } catch (e) {
+      return defaultBoundaries;
+    }
   });
 
   // State for Layers
-  const [layers, setLayers] = useState([
-    { id: 1, name: 'Firebrick', thickness: 0.1, k: 1.4 },
-    { id: 2, name: 'Insulation', thickness: 0.05, k: 0.04 },
-    { id: 3, name: 'Steel Shell', thickness: 0.01, k: 45 }
-  ]);
+  const [layers, setLayers] = useState(() => {
+    if (typeof window === 'undefined') {
+      return [
+        { id: 1, name: 'Firebrick', thickness: 0.1, k: 1.4 },
+        { id: 2, name: 'Insulation', thickness: 0.05, k: 0.04 },
+        { id: 3, name: 'Steel Shell', thickness: 0.01, k: 45 }
+      ];
+    }
+    try {
+      const saved = localStorage.getItem('heat-transfer:layers');
+      return saved ? JSON.parse(saved) : [
+        { id: 1, name: 'Firebrick', thickness: 0.1, k: 1.4 },
+        { id: 2, name: 'Insulation', thickness: 0.05, k: 0.04 },
+        { id: 3, name: 'Steel Shell', thickness: 0.01, k: 45 }
+      ];
+    } catch (e) {
+      return [
+        { id: 1, name: 'Firebrick', thickness: 0.1, k: 1.4 },
+        { id: 2, name: 'Insulation', thickness: 0.05, k: 0.04 },
+        { id: 3, name: 'Steel Shell', thickness: 0.01, k: 45 }
+      ];
+    }
+  });
 
   const [results, setResults] = useState(null);
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
   // Auto-calculate on state change
+  const numericBoundaries = useMemo(() => ({
+    tInner: parseFloat(boundaries.tInner) || 0,
+    hInner: parseFloat(boundaries.hInner) || 0,
+    tOuter: parseFloat(boundaries.tOuter) || 0,
+    hOuter: parseFloat(boundaries.hOuter) || 0,
+  }), [boundaries]);
+
   useEffect(() => {
     const fetchResults = async () => {
       const res = await fetch('/api/heat-transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ layers, boundaries, area: 1 })
+        body: JSON.stringify({ layers, boundaries: numericBoundaries, area: 1 })
       });
       const data = await res.json();
       setResults(data);
     };
     
     fetchResults();
-  }, [layers, boundaries]);
+  }, [layers, numericBoundaries]);
 
   const generateFallbackAiAnalysis = (errorMessage) => {
     const flux = results ? (results.heatFlux.toFixed(2) + ' W/m2') : 'N/A';
@@ -67,7 +112,7 @@ export default function HeatTransferPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          inputs: { layers, boundaries, area: 1 },
+          inputs: { layers, boundaries: numericBoundaries, area: 1 },
           result: {
             heatFlux: results?.heatFlux,
             overallU: results?.overallU,
@@ -90,15 +135,6 @@ export default function HeatTransferPage() {
 
   // Persist layers and boundaries locally
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('heat-transfer:layers');
-      const savedB = localStorage.getItem('heat-transfer:boundaries');
-      if (saved) setLayers(JSON.parse(saved));
-      if (savedB) setBoundaries(JSON.parse(savedB));
-    } catch (e) {}
-  }, []);
-
-  useEffect(() => {
     try { localStorage.setItem('heat-transfer:layers', JSON.stringify(layers)); } catch (e) {}
   }, [layers]);
 
@@ -117,16 +153,34 @@ export default function HeatTransferPage() {
     URL.revokeObjectURL(url);
   };
 
+  const normalizeNumericInput = (value) => {
+    if (typeof value !== 'string') return value;
+    if (value === '' || value === '-' || value === '.' || value === '-.') return value;
+    const negative = value.startsWith('-');
+    let normalized = negative ? value.slice(1) : value;
+    if (normalized.length > 1 && normalized.startsWith('0') && !normalized.startsWith('0.')) {
+      normalized = normalized.replace(/^0+/, '');
+    }
+    if (normalized === '') normalized = '0';
+    return negative ? `-${normalized}` : normalized;
+  };
+
   const handleBoundaryChange = (e) => {
-    setBoundaries({ ...boundaries, [e.target.name]: parseFloat(e.target.value) || 0 });
+    const cleaned = normalizeNumericInput(e.target.value);
+    setBoundaries({ ...boundaries, [e.target.name]: cleaned });
   };
 
   const handleLayerChange = (id, field, value) => {
     setLayers(layers.map(l => {
       if (l.id !== id) return l;
+      if (field === 'name') {
+        return { ...l, name: value };
+      }
+      const cleaned = normalizeNumericInput(value);
+      const parsed = parseFloat(cleaned);
       return {
         ...l,
-        [field]: field === 'name' ? value : parseFloat(value) || 0
+        [field]: Number.isFinite(parsed) ? parsed : 0
       };
     }));
   };
@@ -148,13 +202,8 @@ export default function HeatTransferPage() {
     setLayers(layers.filter(l => l.id !== id));
   };
 
-  const totalLayerThickness = useMemo(() => {
-    return layers.reduce((sum, layer) => sum + layer.thickness, 0);
-  }, [layers]);
-
-  const totalLayerResistance = useMemo(() => {
-    return layers.reduce((sum, layer) => sum + (layer.k > 0 ? layer.thickness / layer.k : 0), 0);
-  }, [layers]);
+  const totalLayerThickness = layers.reduce((sum, layer) => sum + layer.thickness, 0);
+  const totalLayerResistance = layers.reduce((sum, layer) => sum + (layer.k > 0 ? layer.thickness / layer.k : 0), 0);
 
   // Prepare chart data colors mapping
   const chartAreas = useMemo(() => {
