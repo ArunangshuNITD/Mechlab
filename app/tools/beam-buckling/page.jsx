@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
+import * as THREE from 'three';
 import { useRouter } from 'next/navigation'; // Assuming Next.js App Router
 import { 
   Gauge, 
@@ -24,6 +26,152 @@ import {
   ExternalLink
 } from 'lucide-react';
 import ToolInstructions from '@/app/components/ToolInstructions';
+
+const BeamShaderMaterial = {
+  uniforms: {
+    uLoad: { value: 1000.0 },
+    uLength: { value: 2.0 },
+    uWidth: { value: 0.1 },
+    uHeight: { value: 0.2 },
+    uE: { value: 200e9 },
+    uMaxStress: { value: 1e6 },
+    uYield: { value: 250e6 },
+    uScaleFactor: { value: 0.35 },
+  },
+  vertexShader: `
+    uniform float uLoad;
+    uniform float uLength;
+    uniform float uWidth;
+    uniform float uHeight;
+    uniform float uE;
+    uniform float uMaxStress;
+    uniform float uCriticalLoad;
+    uniform float uScaleFactor;
+
+    varying float vStressRatio;
+    varying float vXPos;
+    varying vec3 vNormal;
+
+    void main() {
+      vNormal = normal;
+      vec3 pos = position;
+      float x = pos.y + (uLength * 0.5);
+      vXPos = x;
+
+      float I = (uWidth * pow(uHeight, 3.0)) / 12.0;
+      float deflection = 0.0;
+      if (I > 0.0 && uE > 0.0 && x >= 0.0) {
+        deflection = (uLoad * x * x * (3.0 * uLength - x)) / (6.0 * uE * I);
+      }
+
+      pos.x += deflection * uScaleFactor;
+      float c = max(uWidth, uHeight) * 0.5;
+      float bendingMoment = uLoad * x;
+      float localStress = (bendingMoment * c) / max(I, 0.00001);
+      vStressRatio = uMaxStress > 0.0 ? clamp(localStress / uMaxStress, 0.0, 1.0) : 0.0;
+
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying float vStressRatio;
+    varying float vXPos;
+    varying vec3 vNormal;
+    uniform float uLength;
+
+    vec3 getHeatmapColor(float val) {
+      val = clamp(val, 0.0, 1.0);
+      float r = clamp(min(4.0 * val - 1.5, -4.0 * val + 4.5), 0.0, 1.0);
+      float g = clamp(min(4.0 * val - 0.5, -4.0 * val + 3.5), 0.0, 1.0);
+      float b = clamp(min(4.0 * val + 0.5, -4.0 * val + 2.5), 0.0, 1.0);
+      return vec3(r, g, b);
+    }
+
+    void main() {
+      vec3 baseColor = getHeatmapColor(vStressRatio);
+      float rootDist = vXPos / uLength;
+      if (rootDist < 0.04) {
+        float glow = (1.0 - rootDist / 0.04);
+        baseColor = mix(baseColor, vec3(1.0, 0.05, 0.1), glow * 0.7);
+      }
+      vec3 lightDir = normalize(vec3(1.0, 1.0, 2.0));
+      float diff = max(dot(vNormal, lightDir), 0.3);
+      gl_FragColor = vec4(baseColor * diff, 1.0);
+    }
+  `,
+};
+
+function BeamScene({ loadP, lengthL, widthB, heightH, youngE, yieldStrength, maxStress, criticalLoad }) {
+  const meshRef = useRef();
+  const materialRef = useRef();
+
+  const geometry = useMemo(
+    () => new THREE.BoxGeometry(widthB, lengthL, heightH, 32, 120, 32),
+    [lengthL, heightH, widthB]
+  );
+
+  const uniforms = useMemo(
+    () => ({
+      uLoad: { value: loadP },
+      uLength: { value: lengthL },
+      uWidth: { value: widthB },
+      uHeight: { value: heightH },
+      uE: { value: youngE },
+      uMaxStress: { value: maxStress },
+      uCriticalLoad: { value: criticalLoad },
+      uScaleFactor: { value: 0.35 },
+    }),
+    [loadP, lengthL, widthB, heightH, youngE, maxStress, criticalLoad]
+  );
+
+  const shaderOptions = useMemo(
+    () => ({ ...BeamShaderMaterial, uniforms }),
+    [uniforms]
+  );
+
+  return (
+    <group position={[0, lengthL / 2, 0]}>
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[widthB * 2.5, 0.08, heightH * 2.5]} />
+        <meshStandardMaterial color="#334155" roughness={0.3} />
+      </mesh>
+
+      <mesh ref={meshRef} geometry={geometry}>
+        <shaderMaterial ref={materialRef} args={[shaderOptions]} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+const DynamicCanvasWrapper = dynamic(
+  async () => {
+    const { Canvas } = await import('@react-three/fiber');
+    const { OrbitControls, Grid } = await import('@react-three/drei');
+
+    return function ThreeCanvas(props) {
+      return (
+        <Canvas camera={{ position: [3.5, 1.8, 4.2], fov: 45 }}>
+          <ambientLight intensity={0.8} />
+          <directionalLight position={[10, 10, 10]} intensity={1.2} />
+          <BeamScene {...props} />
+          <Grid
+            args={[20, 20]}
+            cellSize={0.5}
+            cellThickness={1}
+            cellColor="#475569"
+            sectionSize={2}
+            sectionThickness={1.5}
+            sectionColor="#94a3b8"
+            fadeDistance={25}
+            infiniteGrid
+          />
+          <OrbitControls makeDefault minDistance={0.5} maxDistance={15} />
+        </Canvas>
+      );
+    };
+  },
+  { ssr: false }
+);
 
 export default function BeamBucklingPage() {
   const router = useRouter();
@@ -75,12 +223,12 @@ export default function BeamBucklingPage() {
   const [error, setError] = useState('');
 
   // K-Factor mapping for column boundary conditions
-  const kFactors = {
+  const kFactors = useMemo(() => ({
     pinned_pinned: 1.0,
     fixed_fixed: 0.5,
     fixed_pinned: 0.7,
-    fixed_free: 2.0
-  };
+    fixed_free: 2.0,
+  }), []);
 
   // Get current active material & shape specs
   const activeMaterial = materialPresets[selectedMaterial] || materialPresets.steel_a36;
@@ -98,10 +246,8 @@ export default function BeamBucklingPage() {
   // ---------------------------------------------------------------------------
   // 2. MATHEMATICAL & STRUCTURAL COMPUTATIONS
   // ---------------------------------------------------------------------------
-  const activeResult = useMemo(() => {
+  const computedBuckling = useMemo(() => {
     try {
-      setError('');
-
       const K = kFactors[inputs.condition] || 1.0;
       const L_effective = K * inputs.L_m; // meters
 
@@ -202,38 +348,47 @@ export default function BeamBucklingPage() {
       const impact_combined_stress_mpa = impact_axial_stress_mpa + impact_bending_stress_mpa;
 
       return {
-        P_cr_kn: P_cr_kn.toFixed(1),
-        slenderness: slenderness.toFixed(1),
-        slenderness_critical: slenderness_critical.toFixed(1),
-        columnRegime,
-        r_mm: (r_m * 1000).toFixed(1),
-        Z_cm3: (Z_m3 * 1e6).toFixed(1),
+        result: {
+          P_cr_kn: P_cr_kn.toFixed(1),
+          slenderness: slenderness.toFixed(1),
+          slenderness_critical: slenderness_critical.toFixed(1),
+          columnRegime,
+          r_mm: (r_m * 1000).toFixed(1),
+          Z_cm3: (Z_m3 * 1e6).toFixed(1),
 
-        static_fos: static_fos.toFixed(2),
-        max_M_static_kNm: max_M_static_kNm.toFixed(2),
-        max_V_static_kn: max_V_static_kn.toFixed(2),
-        static_combined_stress_mpa: static_combined_stress_mpa.toFixed(1),
+          static_fos: static_fos.toFixed(2),
+          max_M_static_kNm: max_M_static_kNm.toFixed(2),
+          max_V_static_kn: max_V_static_kn.toFixed(2),
+          static_combined_stress_mpa: static_combined_stress_mpa.toFixed(1),
 
-        sigma_mean_mpa: sigma_mean_total_mpa.toFixed(1),
-        sigma_alt_mpa: sigma_alt_total_mpa.toFixed(1),
-        goodman_utilization: goodman_utilization.toFixed(2),
-        fatigue_fos: fatigue_fos.toFixed(2),
-        max_M_fatigue_kNm: max_M_fatigue_kNm.toFixed(2),
-        max_V_fatigue_kn: max_V_fatigue_kn.toFixed(2),
+          sigma_mean_mpa: sigma_mean_total_mpa.toFixed(1),
+          sigma_alt_mpa: sigma_alt_total_mpa.toFixed(1),
+          goodman_utilization: goodman_utilization.toFixed(2),
+          fatigue_fos: fatigue_fos.toFixed(2),
+          max_M_fatigue_kNm: max_M_fatigue_kNm.toFixed(2),
+          max_V_fatigue_kn: max_V_fatigue_kn.toFixed(2),
 
-        delta_stat_mm: (delta_stat_m * 1000).toFixed(3),
-        daf: daf.toFixed(2),
-        P_impact_kn: P_impact_kn.toFixed(1),
-        impact_fos: impact_fos.toFixed(2),
-        max_M_impact_kNm: max_M_impact_kNm.toFixed(2),
-        max_V_impact_kn: max_V_impact_kn.toFixed(2),
-        impact_combined_stress_mpa: impact_combined_stress_mpa.toFixed(1),
+          delta_stat_mm: (delta_stat_m * 1000).toFixed(3),
+          daf: daf.toFixed(2),
+          P_impact_kn: P_impact_kn.toFixed(1),
+          impact_fos: impact_fos.toFixed(2),
+          max_M_impact_kNm: max_M_impact_kNm.toFixed(2),
+          max_V_impact_kn: max_V_impact_kn.toFixed(2),
+          impact_combined_stress_mpa: impact_combined_stress_mpa.toFixed(1),
+        },
+        error: '',
       };
     } catch (err) {
-      setError(err.message);
-      return null;
+      return {
+        result: null,
+        error: err?.message || 'Unable to compute buckling results.',
+      };
     }
-  }, [inputs, selectedMaterial, selectedShape]);
+  }, [inputs, activeMaterial, activeShape, kFactors]);
+
+  const activeResult = computedBuckling.result;
+  const activeResultError = computedBuckling.error;
+  const displayedError = error || activeResultError;
 
   // Operational Condition Failure Flag
   const isFailed = useMemo(() => {
@@ -259,6 +414,38 @@ export default function BeamBucklingPage() {
       return { M_max: activeResult.max_M_impact_kNm, V_max: activeResult.max_V_impact_kn };
     }
   }, [loadTab, activeResult]);
+
+  const beamRenderParams = useMemo(() => {
+    const currentLoadKn =
+      loadTab === 'static'
+        ? inputs.P_static_kn
+        : loadTab === 'fatigue'
+        ? inputs.P_mean_kn + inputs.P_alt_kn
+        : parseFloat(activeResult?.P_impact_kn || 0);
+
+    const shapeDepth = activeShape.depth_mm / 1000;
+    const widthB = Math.max(shapeDepth * 0.8, 0.05);
+    const heightH = Math.max(shapeDepth * 0.45, 0.04);
+
+    const stressMpa = activeResult
+      ? loadTab === 'static'
+        ? parseFloat(activeResult.static_combined_stress_mpa)
+        : loadTab === 'fatigue'
+        ? parseFloat(activeResult.sigma_mean_mpa) + parseFloat(activeResult.sigma_alt_mpa)
+        : parseFloat(activeResult.impact_combined_stress_mpa) || 0
+      : 1;
+
+    return {
+      loadP: currentLoadKn * 1000,
+      lengthL: inputs.L_m,
+      widthB,
+      heightH,
+      youngE: activeMaterial.E_gpa * 1e9,
+      yieldStrength: activeMaterial.S_y * 1e6,
+      maxStress: Math.max(stressMpa * 1e6, 1e5),
+      criticalLoad: parseFloat(activeResult?.P_cr_kn || 0) * 1000,
+    };
+  }, [loadTab, inputs, activeMaterial, activeShape, activeResult]);
 
   // ---------------------------------------------------------------------------
   // 3. SVG DIAGRAM PATH GENERATORS
@@ -386,10 +573,10 @@ export default function BeamBucklingPage() {
         <header className="border-b border-slate-800 pb-4 flex flex-wrap justify-between items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-cyan-400 flex items-center gap-2">
-              <Layers className="w-6 h-6" /> Structural Buckling, Fatigue & Impact Studio
+              <Layers className="w-6 h-6" /> Buckling Lab
             </h1>
             <p className="text-slate-400 text-xs mt-1">
-              Live Deflection, SFD, and BMD diagrams on a single unified dashboard.
+              Your live structural workshop for columns, knots, and stability diagnostics.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -403,12 +590,12 @@ export default function BeamBucklingPage() {
         </header>
         <ToolInstructions
           title="Beam Buckling"
-          subtitle="Select a load regime, pick material and cross-section presets, then enter geometry and loads. Results update instantly."
-          quick="1. Select regime · 2. Set geometry · 3. Inspect diagrams"
+          subtitle="Select materials, boundary conditions, and loading scenarios to reveal structural stability and risk paths."
+          quick="1. Pick a profile · 2. Set the load · 3. Read the safety pulse"
           steps={[
-            'Start with preset material and shape or add custom library items.',
-            'Adjust length, eccentricity and load magnitudes for realistic scenarios.',
-            'Switch tabs to check fatigue or impact behavior; use Goodman utilization for fatigue.'
+            'Choose a section and material preset then tune the span and fixity.',
+            'Set static, fatigue, or impact loading to explore different failure mechanisms.',
+            'Review the diagrams and AI advisory to understand whether the member is safe or at risk.'
           ]}
         />
 
@@ -695,6 +882,23 @@ export default function BeamBucklingPage() {
           {/* Right Column: Unified Multi-Diagram Dashboard (7 cols) */}
           <div className="lg:col-span-7 space-y-6">
             
+            {/* 3D Preview Panel */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-cyan-300">3D Column Buckling Preview</h3>
+                  <p className="text-xs text-slate-400">Interactive vertical column buckling visualization with stress heatmap.</p>
+                </div>
+                <div className="text-[11px] font-mono text-slate-400">
+                  {beamRenderParams.lengthL.toFixed(2)}m × {(beamRenderParams.widthB * 1000).toFixed(0)}mm × {(beamRenderParams.heightH * 1000).toFixed(0)}mm
+                </div>
+              </div>
+
+              <div className="h-[340px] rounded-3xl overflow-hidden bg-slate-950/80 border border-slate-800">
+                <DynamicCanvasWrapper {...beamRenderParams} />
+              </div>
+            </div>
+
             {/* Structural Status Banner */}
             {activeResult && (
               <div className={`p-4 rounded-2xl border transition-all ${
@@ -834,10 +1038,10 @@ export default function BeamBucklingPage() {
             </div>
 
             {/* Error Message */}
-            {error && (
+            {displayedError && (
               <div className="bg-red-950/40 border border-red-500/50 p-4 rounded-xl text-red-400 text-xs flex items-center gap-3">
                 <AlertTriangle className="w-5 h-5 shrink-0" />
-                <span>{error}</span>
+                <span>{displayedError}</span>
               </div>
             )}
 
@@ -881,7 +1085,7 @@ export default function BeamBucklingPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-5 h-5 text-cyan-400" />
-                      <h4 className="text-sm font-bold text-white">Gemini Structural Advisor</h4>
+                      <h4 className="text-sm font-bold text-white">Gemini Structural Oracle</h4>
                     </div>
 
                     <button

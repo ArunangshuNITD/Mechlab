@@ -7,7 +7,7 @@ export default function ToolInstructions({ title, subtitle, quick, steps = [] })
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg shadow-black/40 mb-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h2 className="text-cyan-300 font-semibold uppercase tracking-wider text-sm">How to use — {title}</h2>
+          <h2 className="text-cyan-300 font-semibold uppercase tracking-wider text-sm">Launch Guide — {title}</h2>
           {subtitle && (
             <p className="text-slate-400 mt-3 text-sm leading-relaxed max-w-3xl">{subtitle}</p>
           )}

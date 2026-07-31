@@ -34,7 +34,7 @@ export default function Dashboard() {
       id: 'beam-stress',
       title: 'Beam Buckling & Stress',
       category: 'Solid Mechanics',
-      description: 'Analyze critical buckling loads, bending moments, shear stress distributions, and deflection curves for straight and curved beams.',
+      description: 'Probe buckling thresholds, bending signatures, shear narratives, and deflection stories for structural members.',
       formula: 'P_cr = (π²EI) / (KL)²',
       status: 'JS Solver Ready',
       isReady: true,
@@ -48,7 +48,7 @@ export default function Dashboard() {
       id: 'centrifugal-pump',
       title: 'Centrifugal Pump Analysis',
       category: 'Fluid Machinery',
-      description: 'Generate pump performance curves, NPSH cavitation margins, pipe friction head losses, and dynamic efficiency points.',
+      description: 'Compose pump performance curves, guard against cavitation, and tune efficiency across your hydraulic system.',
       formula: 'TDH = H_s + H_d + h_f',
       status: 'JS Solver Ready',
       isReady: true,
@@ -62,7 +62,7 @@ export default function Dashboard() {
       id: 'heat-conduction',
       title: 'Heat Transfer Conduction',
       category: 'Thermodynamics',
-      description: 'Calculate steady-state heat transfer through composite multi-layer walls and evaluate conductive and convective resistances.',
+      description: 'Trace steady-state heat flow across multi-layer barriers and spotlight thermal bottlenecks.',
       formula: 'q = -k A (dT/dx)',
       status: 'JS Solver Ready',
       isReady: true,
@@ -76,7 +76,7 @@ export default function Dashboard() {
       id: 'universal-coupling',
       title: 'Universal Coupling Viewer',
       category: 'Machine Dynamics',
-      description: 'Interactive 3D solid model kinematic animation, velocity ratio charting, and stress visualization for universal joints.',
+      description: 'Spin through 3D Cardan motion, visualize velocity wobble, and understand kinematic phase drift.',
       formula: 'ω₂ = (ω₁cosα) / (1 - sin²α cos²θ)',
       status: 'ThreeJS Ready',
       isReady: true,
@@ -129,10 +129,10 @@ export default function Dashboard() {
                 <Sparkles className="w-3.5 h-3.5" /> Engine v2.4 Active
               </div>
               <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-                Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">MechLab Workspace</span>
+                Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">MechLab Playground</span>
               </h2>
               <p className="text-slate-400 text-sm sm:text-base leading-relaxed">
-                Select an engineering module to execute JavaScript solver algorithms, view real-time 3D models, or restore cached analysis parameters from MongoDB.
+                Choose your next mechanical experiment, run interactive JavaScript solvers, visualize 3D systems, and revive cached analysis sessions.
               </p>
             </div>
 
@@ -207,7 +207,7 @@ export default function Dashboard() {
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
             <input 
               type="text"
-              placeholder="Search engineering modules..."
+              placeholder="Hunt for the next experiment..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-slate-900/80 border border-slate-800 rounded-xl pl-9 pr-9 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"

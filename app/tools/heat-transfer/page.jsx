@@ -176,21 +176,21 @@ export default function HeatTransferPage() {
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
             <Thermometer className="text-orange-500" />
-            Heat Transfer Conduction
+            Thermal Conduction Forge
           </h1>
-          <p className="text-slate-400 mt-2 text-sm">1D Steady-State Composite Wall Analysis</p>
+          <p className="text-slate-400 mt-2 text-sm">1D steady-state heat flow through composite wall assemblies.</p>
         </div>
       </div>
 
       <ToolInstructions
         title="Heat Transfer"
-        subtitle="Enter boundary conditions and configure material layers. The solver updates automatically and plots the temperature gradient."
-        quick="1. Boundaries · 2. Layers · 3. Inspect results"
+        subtitle="Build a layered thermal assembly, adjust boundary conditions, and reveal the heat path that drives your design."
+        quick="1. Set boundaries · 2. Layer materials · 3. Read the thermal map"
         steps={[
-          'Pick inner/outside temperatures and convection coefficients.',
-          'Modify or add layers to match your assembly.',
-          'Watch the gradient plot and summary metrics update in real time.',
-          'Use the dominant resistance indicator to identify the thermal bottleneck.'
+          'Define inner and outer temperatures plus convection coefficients.',
+          'Add or tune layers to model your insulation assembly.',
+          'Follow the temperature gradient and resistance ranking to spot bottlenecks.',
+          'Use the AI advisor to get design improvement ideas.'
         ]}
       />
 
@@ -399,7 +399,7 @@ export default function HeatTransferPage() {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <Bot className="text-cyan-300" />
-                  <h4 className="text-sm font-bold text-white">Gemini Thermal Advisor</h4>
+                  <h4 className="text-sm font-bold text-white">Gemini Thermal Oracle</h4>
                 </div>
                 <div>
                   <button onClick={fetchAiAnalysis} disabled={aiLoading} className="text-xs px-3 py-1 rounded-md bg-slate-800/60 hover:bg-slate-800/80 border border-slate-700 text-slate-200">

@@ -148,11 +148,11 @@ export default function CentrifugalPumpStudio() {
           <div className="flex items-center gap-2">
             <div className="h-4 w-1 bg-cyan-400 rounded-full"></div>
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-              <span className="text-cyan-400 font-mono">⚡</span> Centrifugal Pump Hydrodynamics Studio
+              <span className="text-cyan-400 font-mono">🌊</span> Centrifugal Pump Symphony
             </h1>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Real-time Total Dynamic Head (TDH), NPSH Cavitation Analysis, System Head Curves & Hydraulics Analysis.
+            Conduct the flow, navigate cavitation, and tune hydraulic efficiency across your pump system.
           </p>
         </div>
 
@@ -202,12 +202,12 @@ export default function CentrifugalPumpStudio() {
 
       <ToolInstructions
         title="Centrifugal Pump"
-        subtitle="Use the tabs to switch between operating parameters, geometry, and fluid properties. Adjust flow, speed and piping dimensions to see TDH, NPSH margin and efficiency update live."
-        quick="1. Set operating point · 2. Tune geometry · 3. Check NPSH"
+        subtitle="Navigate pump flow, head, and cavitation behavior with real-time hydraulic analysis and geometry tuning."
+        quick="1. Set operating point · 2. Tune geometry · 3. Optimize cavitation margin"
         steps={[
-          'Start with an expected flow and RPM for your system.',
-          'Check NPSH availability — increase suction diameter or reduce lift if margin is low.',
-          'Optimize impeller geometry and speed to improve efficiency and reduce shaft power.'
+          'Start with your desired flow and speed, then review the TDH budget.',
+          'Tune suction and delivery piping plus impeller geometry for smooth hydraulics.',
+          'Watch NPSH and efficiency metrics update instantly as you adjust the system.'
         ]}
       />
 
@@ -726,7 +726,7 @@ export default function CentrifugalPumpStudio() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Bot className="text-cyan-300" />
-                <h4 className="text-sm font-bold text-white">Gemini Hydraulic Advisor</h4>
+                  <h4 className="text-sm font-bold text-white">Gemini Hydraulic Oracle</h4>
               </div>
               <div>
                 <button onClick={fetchAiAnalysisPump} disabled={aiLoading} className="text-xs px-3 py-1 rounded-md bg-slate-800/60 hover:bg-slate-800/80 border border-slate-700 text-slate-200">
