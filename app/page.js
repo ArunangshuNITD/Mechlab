@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
+import { signIn, signOut, useSession } from 'next-auth/react';
 import { 
   Layers, 
   Droplets, 
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 
 export default function Dashboard() {
+  const { data: session } = useSession();
   const [activeTab, setActiveTab] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -252,6 +254,8 @@ export default function Dashboard() {
 
 // Navbar Component
 function Navbar() {
+  const { data: session } = useSession();
+  
   return (
     <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -289,14 +293,37 @@ function Navbar() {
           
           <div className="h-6 w-px bg-slate-800 mx-1 hidden sm:block" />
 
-          {/* Profile Badge */}
-          <div className="flex items-center gap-2 pl-1 cursor-pointer">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 p-0.5">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center font-mono text-xs font-bold text-cyan-400">
-                ME
-              </div>
+          {/* Auth Buttons or Profile Badge */}
+          {!session ? (
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => signIn()}
+                className="px-4 py-1.5 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-all"
+              >
+                Sign In
+              </button>
+              <button 
+                onClick={() => signIn()}
+                className="px-4 py-1.5 text-xs font-semibold text-slate-950 bg-cyan-500 hover:bg-cyan-400 rounded-lg shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02]"
+              >
+                Sign Up
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2 pl-1">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 p-0.5">
+                <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center font-mono text-xs font-bold text-cyan-400">
+                  {session.user.name?.charAt(0).toUpperCase() || "U"}
+                </div>
+              </div>
+              <button 
+                onClick={() => signOut()}
+                className="px-3 py-1 text-xs font-medium text-slate-300 hover:text-red-400 transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
 
       </div>
