@@ -1,13 +1,20 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import ToolInstructions from '@/app/components/ToolInstructions';
 import { analyzePump, FLUID_PRESETS } from "@/lib/centrifugal-pump";
+import { HydraulicParticleSystem, createAnimationLoop } from "@/lib/hydraulic-particles";
 import { Bot } from 'lucide-react';
 
 export default function CentrifugalPumpStudio() {
   // Mode & Tabs State
   const [activeTab, setActiveTab] = useState("operational"); // 'operational' | 'geometry' | 'fluid'
+  
+  // Canvas & Particle System Refs
+  const canvasRef = useRef(null);
+  const particleSystemRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const [cavitationShake, setCavitationShake] = useState(false);
 
   // Input Parameters State
   const [fluidKey, setFluidKey] = useState("water20");
@@ -102,6 +109,77 @@ export default function CentrifugalPumpStudio() {
 
     return insights;
   }, [results, suctionHead, suctionDiameter]);
+
+  // Initialize and manage particle system
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    try {
+      // Initialize particle system
+      if (!particleSystemRef.current) {
+        particleSystemRef.current = new HydraulicParticleSystem(canvasRef.current);
+        
+        // Resize canvas
+        canvasRef.current.width = canvasRef.current.offsetWidth;
+        canvasRef.current.height = canvasRef.current.offsetHeight;
+        particleSystemRef.current.resizeCanvas(canvasRef.current.width, canvasRef.current.height);
+
+        // Start animation loop
+        let lastTime = performance.now();
+        
+        const animate = (currentTime) => {
+          const deltaTime = (currentTime - lastTime) / 1000;
+          lastTime = currentTime;
+
+          // Clear canvas
+          const gl = particleSystemRef.current.gl;
+          gl.clearColor(0.05, 0.05, 0.08, 0.0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+
+          // Update and render
+          particleSystemRef.current.update(deltaTime);
+          particleSystemRef.current.render();
+
+          animationFrameRef.current = requestAnimationFrame(animate);
+        };
+
+        animationFrameRef.current = requestAnimationFrame(animate);
+      }
+
+      // Update flow rate based on RPM
+      if (particleSystemRef.current) {
+        const flowSpeedMultiplier = rpm / 2900; // Normalize to 2900 RPM baseline
+        particleSystemRef.current.setFlowRate(flowSpeedMultiplier);
+      }
+
+      // Handle cavitation shaking effect
+      setCavitationShake(!results.npsh.safe);
+
+    } catch (error) {
+      console.error("Particle system initialization error:", error);
+    }
+
+    // Cleanup
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [rpm, results.npsh.safe]);
+
+  // Handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (canvasRef.current && particleSystemRef.current) {
+        canvasRef.current.width = canvasRef.current.offsetWidth;
+        canvasRef.current.height = canvasRef.current.offsetHeight;
+        particleSystemRef.current.resizeCanvas(canvasRef.current.width, canvasRef.current.height);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -479,25 +557,64 @@ export default function CentrifugalPumpStudio() {
         {/* Right Column: Dynamic System Diagram + Charts + AI Insights */}
         <div className="lg:col-span-8 space-y-6">
           
-          {/* 1. Dynamic Interactive Piping & Hydraulic System SVG */}
+          {/* 1. Dynamic Interactive Piping & Hydraulic System SVG with Particle Overlay */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 backdrop-blur-md">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-semibold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
                 <span>📐</span> Interactive Hydraulic Piping System Diagram
               </h2>
-              <span className="text-xs font-mono bg-cyan-950/60 text-cyan-300 px-2.5 py-1 rounded border border-cyan-800/50">
-                Live Dimension Scaler
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-mono bg-cyan-950/60 text-cyan-300 px-2.5 py-1 rounded border border-cyan-800/50">
+                  Live Dimension Scaler
+                </span>
+                {cavitationShake && (
+                  <span className="text-xs font-mono bg-rose-950/60 text-rose-300 px-2.5 py-1 rounded border border-rose-800/50 animate-pulse">
+                    ⚠️ Cavitation Detected - Pump Vibrating
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* SVG Interactive Canvas */}
-            <div className="w-full h-80 bg-[#070A10] rounded-xl border border-slate-800/80 relative overflow-hidden flex items-center justify-center">
-              <svg className="w-full h-full" viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet">
+            {/* SVG Interactive Canvas with Particle Overlay */}
+            <div className={`w-full h-80 bg-[#070A10] rounded-xl border border-slate-800/80 relative overflow-hidden flex items-center justify-center ${
+              cavitationShake ? "animate-bounce" : ""
+            }`} style={cavitationShake ? {
+              animation: "cavitationShake 0.1s infinite"
+            } : {}}>
+              <style jsx>{`
+                @keyframes cavitationShake {
+                  0%, 100% { transform: translate(0, 0); }
+                  25% { transform: translate(-2px, -2px); }
+                  50% { transform: translate(2px, 2px); }
+                  75% { transform: translate(-2px, 2px); }
+                }
+              `}</style>
+
+              {/* WebGL2 Particle Canvas */}
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full rounded-lg"
+                style={{ position: "absolute", top: 0, left: 0 }}
+              />
+
+              {/* SVG Piping Diagram (Behind Particles) */}
+              <svg className="w-full h-full absolute inset-0" viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet">
                 <defs>
                   {/* Fluid Gradient */}
                   <linearGradient id="fluidGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#00F2FE" stopOpacity="0.8" />
+                    <stop offset="0%" stopColor="#00F2FE" stopOpacity="0.95" />
+                    <stop offset="45%" stopColor="#00B0FF" stopOpacity="0.9" />
                     <stop offset="100%" stopColor="#4FACFE" stopOpacity="0.8" />
+                  </linearGradient>
+                  {/* Pipe Core Gradient */}
+                  <linearGradient id="pipeCore" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#0B1220" />
+                    <stop offset="100%" stopColor="#17233A" />
+                  </linearGradient>
+                  {/* Water Surface Highlight */}
+                  <linearGradient id="waterSurface" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#CFFAFE" stopOpacity="0.45" />
+                    <stop offset="100%" stopColor="#0F172A" stopOpacity="0.0" />
                   </linearGradient>
                   {/* Energy Line Gradient */}
                   <linearGradient id="eglGrad" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -515,8 +632,9 @@ export default function CentrifugalPumpStudio() {
                 {/* Sump Reservoir (Bottom Left) */}
                 <rect x="60" y="240" width="120" height="90" fill="#0F172A" stroke="#334155" strokeWidth="2" rx="4" />
                 {/* Water Level in Sump */}
-                <rect x="62" y="260" width="116" height="68" fill="url(#fluidGrad)" opacity="0.4" />
-                <line x1="62" y1="260" x2="178" y2="260" stroke="#00F2FE" strokeWidth="2" strokeDasharray="4 2" />
+                <rect x="62" y="260" width="116" height="68" fill="url(#fluidGrad)" opacity="0.78" rx="12" />
+                <path d="M62 292 C76 286 92 300 108 294 C124 288 140 302 156 296 C168 292 178 298 178 298 L178 328 L62 328 Z" fill="#CFFAFE" opacity="0.35" />
+                <line x1="62" y1="260" x2="178" y2="260" stroke="#93C5FD" strokeWidth="2" strokeDasharray="4 3" />
                 <text x="120" y="285" fill="#94A3B8" fontSize="10" textAnchor="middle" fontFamily="monospace">
                   Sump Reservoir
                 </text>
@@ -525,19 +643,28 @@ export default function CentrifugalPumpStudio() {
                 <path
                   d="M 120 280 L 120 180 L 250 180"
                   fill="none"
-                  stroke="#00F2FE"
-                  strokeWidth="8"
+                  stroke="url(#pipeCore)"
+                  strokeWidth="26"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  opacity="0.85"
                 />
                 <path
                   d="M 120 280 L 120 180 L 250 180"
                   fill="none"
-                  stroke="#1E293B"
-                  strokeWidth="2"
+                  stroke="url(#fluidGrad)"
+                  strokeWidth="16"
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  opacity="0.95"
+                />
+                <path
+                  d="M 120 280 L 120 180 L 250 180"
+                  fill="none"
+                  stroke="#FFFFFF"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.18"
                 />
 
                 {/* Centrifugal Pump Icon Assembly */}
@@ -559,16 +686,35 @@ export default function CentrifugalPumpStudio() {
                 <path
                   d={`M 260 148 L 260 ${Math.max(50, 180 - deliveryHead * 3)} L ${Math.min(720, 260 + deliveryLength * 5)} ${Math.max(50, 180 - deliveryHead * 3)}`}
                   fill="none"
-                  stroke="#38BDF8"
-                  strokeWidth="8"
+                  stroke="url(#pipeCore)"
+                  strokeWidth="26"
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                />
+                <path
+                  d={`M 260 148 L 260 ${Math.max(50, 180 - deliveryHead * 3)} L ${Math.min(720, 260 + deliveryLength * 5)} ${Math.max(50, 180 - deliveryHead * 3)}`}
+                  fill="none"
+                  stroke="url(#fluidGrad)"
+                  strokeWidth="16"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.95"
+                />
+                <path
+                  d={`M 260 148 L 260 ${Math.max(50, 180 - deliveryHead * 3)} L ${Math.min(720, 260 + deliveryLength * 5)} ${Math.max(50, 180 - deliveryHead * 3)}`}
+                  fill="none"
+                  stroke="#FFFFFF"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.18"
                 />
 
                 {/* Destination Tank */}
                 <g transform={`translate(${Math.min(680, 240 + deliveryLength * 5)}, ${Math.max(30, 160 - deliveryHead * 3)})`}>
                   <rect x="0" y="0" width="80" height="70" fill="#0F172A" stroke="#334155" strokeWidth="2" rx="4" />
-                  <rect x="2" y="20" width="76" height="48" fill="url(#fluidGrad)" opacity="0.5" />
+                  <rect x="2" y="20" width="76" height="48" fill="url(#fluidGrad)" opacity="0.7" />
+                  <path d="M2 36 C18 34 32 42 58 36 L78 36 L78 68 L2 68 Z" fill="#CFFAFE" opacity="0.22" />
                   <text x="40" y="45" fill="#94A3B8" fontSize="9" textAnchor="middle" fontFamily="monospace">
                     Discharge
                   </text>

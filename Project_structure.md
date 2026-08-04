@@ -30,7 +30,11 @@
       - `route.js`
     - `heat-transfer/`
       - `route.js`
+  - `auth/`
+    - `signin/`
+      - `page.jsx`
   - `components/`
+    - `AuthProvider.jsx`
     - `ToolInstructions.jsx`
   - `tools/`
     - `beam-buckling/`
@@ -39,11 +43,14 @@
       - `page.jsx`
     - `heat-transfer/`
       - `page.jsx`
+    - `universal-coupling/`
+      - `page.jsx`
 
 - `lib/`
   - `buckling.js`
   - `centrifugal-pump.js`
   - `heat-transfer.js`
+  - `universal-coupling.js`
 
 - `public/`
   - `favicon.ico`
